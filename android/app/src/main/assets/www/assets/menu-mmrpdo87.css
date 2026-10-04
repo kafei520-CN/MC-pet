@@ -1,0 +1,97 @@
+html,
+body {
+  margin: 0;
+  background: #f6f6f6;
+  color: #111;
+  font: 15px "Segoe UI", sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+button,
+.row {
+  border: 1px solid #111;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  text-align: left;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover,
+.file:hover {
+  background: #111;
+  color: #fff;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.file input {
+  display: none;
+}
+
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: none;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch span {
+  display: block;
+  box-sizing: border-box;
+  width: 36px;
+  height: 20px;
+  border: 1px solid #111;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.switch span::after {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 3px;
+  border-radius: 50%;
+  background: #111;
+}
+
+.switch input:checked + span {
+  background: #111;
+}
+
+.switch input:checked + span::after {
+  background: #fff;
+  transform: translateX(16px);
+}

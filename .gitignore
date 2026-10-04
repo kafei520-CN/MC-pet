@@ -1,0 +1,6 @@
+.idea/
+*.iml
+tauri-pet/node_modules/
+tauri-pet/dist/
+tauri-pet/src-tauri/target/
+tauri-pet/src-tauri/gen/

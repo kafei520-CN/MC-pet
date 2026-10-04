@@ -1,0 +1,7 @@
+{
+  "name": "mc-pet",
+  "private": true,
+  "scripts": {
+    "tauri": "npm --prefix tauri-pet run tauri"
+  }
+}

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-desktop-map"
+description = "Read window rectangles and the tray target."
+commands.allow = ["desktop_map", "seat_rect", "set_pointer_targets", "load_pet_settings", "save_pet_settings"]

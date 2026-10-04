@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Desktop pet window",
+  "windows": ["main", "menu"],
+  "permissions": ["core:default", "allow-desktop-map"]
+}

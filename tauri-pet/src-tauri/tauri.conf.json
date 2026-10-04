@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MC桌宠",
+  "version": "0.1.0",
+  "identifier": "dev.mcpet.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MC桌宠",
+        "width": 420,
+        "height": 640,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "resizable": false,
+        "focus": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "menu",
+        "title": "菜单",
+        "url": "menu.html",
+        "width": 300,
+        "height": 460,
+        "visible": false,
+        "resizable": false,
+        "center": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}
