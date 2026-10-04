@@ -8,11 +8,15 @@ import { MateActionController } from './mate-engine.js'
 import { choosePetAction } from './tree.js'
 import { createDoll, grabNeck, releaseDoll, releaseNeck, stepDoll, syncDoll } from './ragdoll.js'
 import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
+import { createMc } from './mc/index.js'
+import { BLOCK_PX, SCALE, worldToScreen } from './mc/scale.js'
+import { lightLevels } from './mc/daylight.js'
+import { approachScreenX, blockScreenX, parseSchematic, placeGap, standOnPlaced, standScreenX } from './mc/build.js'
+import starterSchematic from './mc/schematic.json'
 
 const ANDROID = typeof window.PetBridge !== 'undefined'
 
 const TOP_LIMIT = 100
-const SCALE = 4.5
 const FEET = 16.25
 const SEAT = 4
 const HEAD = 12
@@ -28,10 +32,22 @@ view.appendChild(renderer.domElement)
 const scene = new THREE.Scene()
 const camera = new THREE.OrthographicCamera(0, 1, 0, -1, 0.1, 800)
 camera.position.z = 400
-scene.add(new THREE.AmbientLight(0xffffff, 3))
-const sun = new THREE.DirectionalLight(0xffffff, 0.6)
+const ambient = new THREE.AmbientLight(0xffffff, 1.35)
+scene.add(ambient)
+const hemi = new THREE.HemisphereLight(0xe8f0ff, 0x3a2a1c, 0.35)
+scene.add(hemi)
+const sun = new THREE.DirectionalLight(0xffffff, 0.55)
 sun.position.set(40, 80, 120)
 scene.add(sun)
+
+function applyDaylight() {
+  const light = lightLevels()
+  ambient.intensity = light.ambient
+  sun.intensity = light.sun
+  hemi.intensity = 0.25 + 0.55 * light.amount
+}
+
+applyDaylight()
 
 const rig = new THREE.Group()
 const player = new PlayerObject()
@@ -41,6 +57,10 @@ player.ears.visible = false
 player.scale.set(SCALE, SCALE, SCALE)
 rig.add(player)
 scene.add(rig)
+const worldRoot = new THREE.Group()
+worldRoot.name = 'mcWorld'
+scene.add(worldRoot)
+let mcWorld = null
 createChicken().then((bird) => {
   chicken = bird
   rig.add(bird.group)
@@ -57,8 +77,32 @@ player.skin.map = skinTexture
 player.skin.modelType = 'default'
 const bones = bindPlayer(player)
 const actions = new MateActionController()
+const footTip = new THREE.Vector3()
+let standLift = 0
 
-const pet = { x: 180, y: 0, mode: 'idle', seatId: null, seatOffset: 0 }
+function recacheStandLift() {
+  const prevY = player.position.y
+  const prevRig = rig.position.clone()
+  rig.position.set(0, 0, 0)
+  player.position.y = FEET * SCALE
+  playClip(bones, 'PET_IDLE', 0, { x: 0, z: 0 })
+  rig.updateWorldMatrix(true, true)
+  let lowest = Infinity
+  for (const name of ['leftLeg', 'rightLeg']) {
+    footTip.set(0, -12.25, 0)
+    bones[name].localToWorld(footTip)
+    if (footTip.y < lowest) {
+      lowest = footTip.y
+    }
+  }
+  standLift = Number.isFinite(lowest) ? -lowest : 0
+  player.position.y = prevY
+  rig.position.copy(prevRig)
+}
+
+recacheStandLift()
+
+const pet = { x: 180, y: 0, mode: 'idle', seatId: null, seatOffset: 0, vx: 0, vy: 0, onGround: true, inWater: false, jumping: false }
 const swing = { x: 0, y: 0, z: 0 }
 const look = { yaw: 0, pitch: 0 }
 const faceYaw = { current: 0 }
@@ -85,6 +129,11 @@ let phaseTime = 0
 let sitCalm = 0
 let sitWait = 16
 let windowGone = false
+let ignoreSeatId = null
+let buildQueue = []
+let buildJob = null
+let buildBusy = false
+let climb = null
 let seatMotion = null
 let shakeCount = 0
 let shakeAt = 0
@@ -107,6 +156,7 @@ function resize() {
   camera.bottom = -height
   camera.updateProjectionMatrix()
   renderer.setSize(width, height, false)
+  mcWorld?.layout()
   if (!holding && pet.mode !== 'sit') {
     pet.y = floorY()
   }
@@ -116,7 +166,18 @@ function floorY() {
   if (ANDROID) {
     return window.innerHeight * 0.78
   }
+  if (mcWorld) {
+    return mcWorld.supportScreenY(pet.x, pet.y, ignoreSeatId)
+  }
   return window.innerHeight
+}
+
+function nearBlockStand(x, y) {
+  if (!mcWorld) {
+    return false
+  }
+  const stand = mcWorld.supportScreenY(x, y)
+  return Math.abs(stand - y) < 64
 }
 
 let liveSeat = null
@@ -174,6 +235,9 @@ function trySit(x, y, allowCurrent) {
   if (!allowCurrent && avoidSeat && stillOver(avoidSeat, x, y)) {
     return false
   }
+  if (nearBlockStand(x, y)) {
+    return false
+  }
   avoidSeat = null
   const seat = windowUnder(x, y)
   if (!seat) {
@@ -192,6 +256,7 @@ function sitOn(win, x) {
   pet.x = Math.min(max, Math.max(min, x))
   pet.seatOffset = pet.x - win.x
   pet.seatId = win.id
+  ignoreSeatId = null
   pet.y = win.y
   pet.mode = 'sit'
   wander = null
@@ -412,15 +477,60 @@ function stepWander(delta) {
     return
   }
   wander.face = dx > 0 ? 1 : -1
+  if (mcWorld) {
+    pet.mode = 'idle'
+    return
+  }
   pet.x += Math.sign(dx) * Math.min(Math.abs(dx), 86 * delta)
   pet.y = floorY()
   pet.mode = 'idle'
+}
+
+function beginClimb(hint) {
+  const land = worldToScreen(hint.landX, hint.landY)
+  climb = {
+    t: 0,
+    crouch: 0.5,
+    duration: 1.55,
+    fromX: pet.x,
+    fromY: pet.y,
+    toX: land.x,
+    toY: land.y,
+  }
+  poseTime = 0
+  poseName = 'PET_JUMP'
+  pet.vx = 0
+  pet.vy = 0
+  pet.jumping = false
+}
+
+function stepClimb(delta) {
+  climb.t += delta
+  if (climb.t < climb.crouch) {
+    return
+  }
+  if (climb.t >= climb.duration) {
+    pet.x = climb.toX
+    pet.y = climb.toY
+    pet.vy = 0
+    pet.onGround = true
+    climb = null
+    return
+  }
+  const u = (climb.t - climb.crouch) / (climb.duration - climb.crouch)
+  const ease = u * u * (3 - 2 * u)
+  pet.x = climb.fromX + (climb.toX - climb.fromX) * ease
+  const hop = Math.sin(Math.PI * u) * 28
+  pet.y = climb.fromY + (climb.toY - climb.fromY) * ease - hop
 }
 
 function startFall() {
   wander = null
   phase = null
   phaseTime = 0
+  if (pet.seatId) {
+    ignoreSeatId = pet.seatId
+  }
   pet.seatId = null
   pet.mode = 'fall'
   falling = true
@@ -432,8 +542,92 @@ function startFall() {
   }
 }
 
+function startBuild(json) {
+  buildQueue = parseSchematic(json || starterSchematic)
+  buildJob = null
+  buildBusy = false
+  phase = 'build'
+  phaseTime = 0
+  wander = null
+  pet.mode = 'idle'
+}
+
+async function stepBuild(delta) {
+  if (holding || !mcWorld || buildBusy) {
+    return
+  }
+  if (!buildJob) {
+    if (!buildQueue.length) {
+      phase = null
+      pet.mode = 'idle'
+      await mcWorld.holdItem(null)
+      return
+    }
+    const block = buildQueue.shift()
+    buildJob = {
+      block,
+      stage: 'walk',
+      t: 0,
+      placed: false,
+      settled: false,
+    }
+    wander = null
+    return
+  }
+  const job = buildJob
+  if (job.stage !== 'swing' && placeGap(job.block, pet.x) >= 0.2) {
+    job.stage = 'walk'
+    job.settled = false
+    job.t = 0
+    job.targetX = approachScreenX(job.block, pet.x)
+    const dx = job.targetX - pet.x
+    wander = { targetX: job.targetX, face: dx > 0 ? 1 : -1 }
+    return
+  }
+  if (job.stage === 'walk') {
+    wander = null
+    job.face = blockScreenX(job.block) >= pet.x ? 1 : -1
+    if (!job.settled) {
+      job.settled = true
+      return
+    }
+    job.stage = 'hold'
+    job.t = 0
+    buildBusy = true
+    await mcWorld.holdItem(job.block.id)
+    buildBusy = false
+    return
+  }
+  job.t += delta
+  if (job.stage === 'hold' && job.t > 0.12) {
+    job.stage = 'swing'
+    job.t = 0
+    poseTime = 0
+    poseName = 'PET_PLACE'
+    return
+  }
+  if (job.stage === 'swing') {
+    if (!job.placed && job.t > 0.38) {
+      job.placed = true
+      buildBusy = true
+      await mcWorld.placeBlock(job.block.x, job.block.y, job.block.id, job.block.properties, undefined, job.block.z ?? 0)
+      pet.y = standOnPlaced(job.block)
+      pet.vy = 0
+      pet.onGround = true
+      buildBusy = false
+    }
+    if (job.t > 0.85) {
+      buildJob = null
+      wander = null
+    }
+  }
+}
+
 function think(delta) {
   actions.elapsed += delta
+  if (holding) {
+    climb = null
+  }
   if (phase) {
     phaseTime += delta
   }
@@ -457,13 +651,14 @@ function think(delta) {
     windowGone,
     sitCalm,
     sitWait,
+    climb: Boolean(climb),
     wander: Boolean(wander),
     menuSleep,
     locked,
     calm,
     idleWait,
   })
-  if (choice !== 'walk' && choice !== 'wander') {
+  if (choice !== 'walk' && choice !== 'wander' && choice !== 'build' && choice !== 'climb') {
     wander = null
   }
   if (choice === 'window-gone' || (choice === 'fall' && windowGone)) {
@@ -475,6 +670,7 @@ function think(delta) {
   } else if (choice === 'look' && phaseTime > 1.15) {
     phase = 'leap'
     phaseTime = 0
+    ignoreSeatId = pet.seatId
     pet.seatId = null
     pet.mode = 'leap'
     windowGone = false
@@ -487,18 +683,29 @@ function think(delta) {
       phase = phase === 'look' || phase === 'leap' ? phase : null
     }
   }
-  const resolved = phase === 'ragdoll' || phase === 'glance' || phase === 'leap' || phase === 'look'
-    ? phase
-    : falling
-      ? 'fall'
-      : choice
-  if (resolved !== 'walk' && resolved !== 'wander') {
+  const resolved = climb
+    ? 'climb'
+    : phase === 'ragdoll' || phase === 'glance' || phase === 'leap' || phase === 'look'
+      ? phase
+      : falling
+        ? 'fall'
+        : choice
+  if (resolved !== 'walk' && resolved !== 'wander' && resolved !== 'build' && resolved !== 'climb') {
     wander = null
   }
   return resolved
 }
 
 function clipFor(choice) {
+  if (buildJob?.stage === 'swing') {
+    return 'PET_PLACE'
+  }
+  if (pet.inWater && (choice === 'idle' || choice === 'walk' || choice === 'wander' || choice === 'fall')) {
+    return 'PET_SWIM'
+  }
+  if (climb || choice === 'climb') {
+    return 'PET_JUMP'
+  }
   switch (choice) {
     case 'dragging':
       return 'PET_DRAGGING'
@@ -515,6 +722,11 @@ function clipFor(choice) {
       return 'PET_LOOK_DOWN'
     case 'sit':
       return 'PET_SITTING'
+    case 'build':
+      if (buildJob?.stage === 'walk') {
+        return 'PET_WALK_BUILD'
+      }
+      return 'PET_IDLE'
     case 'walk':
     case 'wander':
       return 'PET_WALK_RIGHT'
@@ -554,9 +766,12 @@ function applyPose(delta) {
   } else if (seated) {
     player.position.y = SEAT * SCALE
   } else {
-    player.position.y = FEET * SCALE
+    player.position.y = FEET * SCALE + standLift
   }
   playClip(bones, clip, poseTime, swing)
+  if (phase === 'build') {
+    bones.head.rotation.x = 0
+  }
   if (phase === 'ragdoll' && doll) {
     syncDoll(doll)
   } else if (phase === 'glance') {
@@ -572,12 +787,23 @@ function applyPose(delta) {
   }
   rig.rotation.y = fallYaw
   flapChicken(chicken, delta, performance.now() / 1000)
-  holdChickenLeg(chicken, bones.rightArm, rig)
+  if (mcWorld?.holdingRight()) {
+    if (chicken) {
+      chicken.group.visible = false
+    }
+  } else {
+    holdChickenLeg(chicken, bones.rightArm, rig)
+  }
 }
 
 function faceWalk(delta) {
   player.rotation.z += (0 - player.rotation.z) * Math.min(1, delta * 6)
-  const target = wander && !holding ? (wander.face > 0 ? Math.PI / 2 : -Math.PI / 2) : 0
+  const face = wander && !holding
+    ? wander.face
+    : (phase === 'build' && buildJob?.face)
+      ? buildJob.face
+      : 0
+  const target = face ? (face > 0 ? Math.PI / 2 : -Math.PI / 2) : 0
   let diff = target - faceYaw.current
   while (diff > Math.PI) {
     diff -= Math.PI * 2
@@ -590,7 +816,7 @@ function faceWalk(delta) {
 }
 
 function lookAtPointer(delta) {
-  if (phase === 'look' || phase === 'leap' || phase === 'ragdoll' || phase === 'glance' || falling || (wander && !holding)) {
+  if (phase === 'look' || phase === 'leap' || phase === 'ragdoll' || phase === 'glance' || phase === 'build' || climb || falling || (wander && !holding)) {
     return
   }
   rig.updateWorldMatrix(true, true)
@@ -608,10 +834,10 @@ function lookAtPointer(delta) {
 
 function place(delta) {
   frameChoice = think(delta)
-  if (holding) {
-    trySit(pointer.x, pointer.y, false)
+  if (phase === 'build') {
+    stepBuild(delta)
   }
-  if (frameChoice === 'walk' || frameChoice === 'wander') {
+  if (frameChoice === 'walk' || frameChoice === 'wander' || (frameChoice === 'build' && buildJob?.stage === 'walk')) {
     stepWander(delta)
   }
   if (holding && phase === 'ragdoll' && doll) {
@@ -621,7 +847,7 @@ function place(delta) {
       holding = false
       pressing = false
     } else if (doll.pin) {
-      grabNeck(doll, pointer.x, pointer.y)
+      grabNeck(doll, pet.x, pet.y)
     }
   }
   if (phase === 'ragdoll' && doll) {
@@ -629,8 +855,10 @@ function place(delta) {
     const body = doll.parts[0].body
     body.updateMesh()
     const pos = body.getPosition()
-    pet.x = pos.x
-    pet.y = -pos.y
+    if (!holding) {
+      pet.x = pos.x
+      pet.y = -pos.y
+    }
     const onBar = state.y < -floorY() + 80
     const lying = !doll.pin && onBar && (state.speed < 160 || (doll.rest > 0.25 && state.speed < 280))
     if (lying) {
@@ -654,6 +882,21 @@ function place(delta) {
     }
   } else if (phase === 'leap') {
     pet.y += (phaseTime < 0.18 ? -120 : 40) * delta
+  } else if (climb) {
+    stepClimb(delta)
+  } else if (mcWorld && !holding && phase !== 'ragdoll' && phase !== 'glance' && phase !== 'leap' && !pet.seatId) {
+    mcWorld.stepActor(pet, delta, { wander, ignoreWindowId: ignoreSeatId })
+    if (pet.climbHint && phase !== 'build') {
+      beginClimb(pet.climbHint)
+      pet.climbHint = null
+    }
+    falling = !pet.onGround && !pet.inWater
+    if (pet.onGround && chicken && !mcWorld.holdingRight()) {
+      chicken.group.visible = false
+    }
+    if (falling && chicken && !mcWorld.holdingRight()) {
+      chicken.group.visible = true
+    }
   } else if (falling) {
     pet.y = Math.min(floorY(), pet.y + 46 * delta)
     if (pet.y >= floorY() - 1) {
@@ -674,8 +917,16 @@ function place(delta) {
     pet.x = window.innerWidth / 2
     pet.y = floorY()
   }
-  rig.position.set(pet.x, -pet.y, 0)
+  if (ignoreSeatId) {
+    const win = windows.find((item) => item.id === ignoreSeatId)
+    if (!win || pet.y > win.y + 80) {
+      ignoreSeatId = null
+    }
+  }
+  applyDaylight()
+  rig.position.set(pet.x, -pet.y, BLOCK_PX)
   applyPose(delta)
+  rig.position.z = BLOCK_PX
 }
 
 function bodyHeight() {
@@ -708,17 +959,46 @@ function rememberChibiRest() {
 
 const petSettings = { build: 'wide', chibi: false, skin: '', skinName: '', hidden: false }
 let settingsToken = 0
+let pendingWorld = null
 
 function savePetSettings() {
   settingsToken += 1
-  const payload = JSON.stringify(petSettings)
+  const { world, ...rest } = petSettings
+  const payload = JSON.stringify(rest)
   if (ANDROID) {
-    window.PetBridge.saveSettings(payload)
+    window.PetBridge.saveSettings(JSON.stringify(petSettings))
     return
   }
   invoke('save_pet_settings', { settings: payload }).catch(() => {
     status.textContent = '模型设置没能保存'
   })
+}
+
+function saveWorldFile(world) {
+  if (ANDROID) {
+    petSettings.world = world
+    savePetSettings()
+    return
+  }
+  invoke('save_world', { world: JSON.stringify(world) }).catch((error) => {
+    status.textContent = `世界存档没能保存：${error}`
+  })
+}
+
+function loadWorldFile() {
+  if (ANDROID) {
+    return Promise.resolve(petSettings.world || null)
+  }
+  return invoke('load_world').then((text) => {
+    if (!text) {
+      return null
+    }
+    try {
+      return JSON.parse(text)
+    } catch {
+      return null
+    }
+  }).catch(() => null)
 }
 
 function applyChibi(on, remember = true) {
@@ -745,6 +1025,7 @@ function applyChibi(on, remember = true) {
     bones[name].position.y = rest.y + 12 * (1 - s)
     bones[name].position.z = rest.z * s
   }
+  recacheStandLift()
   petSettings.chibi = on
   if (remember) {
     savePetSettings()
@@ -812,6 +1093,12 @@ function usePetSettings(data, remember) {
     petSettings.hidden = hidden
     rig.visible = !hidden
   }
+  if (data.world) {
+    pendingWorld = data.world
+    saveWorldFile(data.world)
+    mcWorld?.loadSave(data.world)
+    savePetSettings()
+  }
   if (typeof data.skin === 'string' && data.skin) {
     applySkin(data.skin, data.skinName || '', false)
   }
@@ -856,7 +1143,8 @@ function publishPointer() {
   if (ANDROID) {
     return
   }
-  invoke('set_pointer_targets', { rects: hidden ? [] : [hitRect()], held: holding && !hidden })
+  const rects = hidden ? [] : [hitRect(), ...(mcWorld?.blockHitRects() ?? [])]
+  invoke('set_pointer_targets', { rects, held: holding && !hidden })
     .then((cursor) => {
       if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
         pointer.x = cursor.x
@@ -914,11 +1202,14 @@ function bindPointer() {
     lastPointer = { x: event.clientX, y: event.clientY }
     pointer.x = event.clientX
     pointer.y = event.clientY
-    if (trySit(event.clientX, event.clientY, false)) {
-      return
+    if (mcWorld) {
+      const at = mcWorld.resolvePosition(event.clientX, event.clientY)
+      pet.x = at.x
+      pet.y = at.y
+    } else {
+      pet.x = event.clientX
+      pet.y = event.clientY
     }
-    pet.x = event.clientX
-    pet.y = event.clientY
     swing.z = Math.max(-0.7, Math.min(0.7, dx * 0.02))
     swing.x = Math.max(-0.45, Math.min(0.45, dy * 0.015))
   })
@@ -977,6 +1268,7 @@ function frame(now) {
     followSeat()
     place(delta)
     publishPointer()
+    mcWorld?.tick(camera)
     renderer.render(scene, camera)
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error)
@@ -1061,6 +1353,39 @@ if (ANDROID) {
 
 resize()
 bindPointer()
+createMc({
+  parent: worldRoot,
+  bones,
+  getWindows: () => windows,
+  onPersist: (world) => {
+    saveWorldFile(world)
+  },
+}).then(async (api) => {
+  mcWorld = api
+  window.mc = api
+  window.mc.build = (json) => startBuild(json || starterSchematic)
+  const world = pendingWorld || await loadWorldFile()
+  pendingWorld = null
+  if (world?.blocks?.length || world?.hand || world?.offhand) {
+    await api.loadSave(world)
+  } else if (!ANDROID) {
+    startBuild(starterSchematic)
+  }
+  if (!holding && pet.mode !== 'sit') {
+    pet.y = window.innerHeight
+    if (mcWorld) {
+      const at = mcWorld.resolveSpawn(pet.x, pet.y)
+      pet.x = at.x
+      pet.y = at.y
+    } else {
+      pet.y = floorY()
+    }
+    pet.onGround = true
+    pet.vy = 0
+  }
+}).catch((error) => {
+  status.textContent = error instanceof Error ? error.message : String(error)
+})
 if (!ANDROID) {
   refreshWindows().catch((error) => {
     status.textContent = error.message

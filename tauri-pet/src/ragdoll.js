@@ -1,5 +1,6 @@
 import { World } from 'oimo'
 import { Quaternion, Vector3 } from 'three'
+import { BLOCK_PX } from './mc/scale.js'
 
 const SCALE = 4.5
 const UNIT = 100
@@ -156,22 +157,9 @@ function containDoll(doll, screenWidth, taskbarWorldY) {
       }
       hit = true
     }
-    if (z > 48) {
-      z = 48
-      if (vz > 0) {
-        vz = -vz * EDGE_BOUNCE
-      }
-      hit = true
-    } else if (z < -48) {
-      z = -48
-      if (vz < 0) {
-        vz = -vz * EDGE_BOUNCE
-      }
-      hit = true
-    }
-    if (!hit) {
-      continue
-    }
+    z = BLOCK_PX
+    vz = 0
+    hit = true
     body.position.set(x / UNIT, y / UNIT, z / UNIT)
     body.linearVelocity.set(vx, vy, vz)
     body.syncShapes()

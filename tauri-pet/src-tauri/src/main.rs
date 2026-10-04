@@ -47,6 +47,16 @@ fn pet_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Strin
     Ok(dir.join("pet-settings.json"))
 }
 
+fn world_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|err| err.to_string())?;
+    Ok(dir.join("world").join("save.json"))
+}
+
+fn legacy_world_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|err| err.to_string())?;
+    Ok(dir.join("world.json"))
+}
+
 #[tauri::command]
 fn load_pet_settings(app: tauri::AppHandle) -> Option<String> {
     let path = pet_settings_path(&app).ok()?;
@@ -60,6 +70,25 @@ fn save_pet_settings(app: tauri::AppHandle, settings: String) -> Result<(), Stri
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     std::fs::write(path, settings).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn load_world(app: tauri::AppHandle) -> Option<String> {
+    let path = world_path(&app).ok()?;
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        return Some(text);
+    }
+    let legacy = legacy_world_path(&app).ok()?;
+    std::fs::read_to_string(legacy).ok()
+}
+
+#[tauri::command]
+fn save_world(app: tauri::AppHandle, world: String) -> Result<(), String> {
+    let path = world_path(&app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    std::fs::write(path, world).map_err(|err| err.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -205,7 +234,9 @@ fn main() {
             seat_rect,
             set_pointer_targets,
             load_pet_settings,
-            save_pet_settings
+            save_pet_settings,
+            load_world,
+            save_world
         ])
         .setup(|app| {
             let open_menu = MenuItem::with_id(app, "open-menu", "打开菜单", true, None::<&str>)?;

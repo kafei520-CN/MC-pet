@@ -1,0 +1,63 @@
+{
+  "origin": { "anchor": "center", "offsetX": -5, "y": 0 },
+  "slices": [
+    {
+      "z": 0,
+      "layers": [
+        [
+          "dirt",
+          "dirt",
+          "grass_block",
+          "grass_block",
+          "cobblestone",
+          "cobblestone",
+          "oak_planks",
+          "oak_planks",
+          "coarse_dirt",
+          "grass_block"
+        ],
+        [
+          "poppy",
+          "oak_fence",
+          "oak_log",
+          "oak_log",
+          "crafting_table",
+          { "id": "chest", "p": { "facing": "south" } },
+          { "id": "oak_stairs", "p": { "facing": "east" } },
+          "lantern",
+          "dandelion",
+          "pumpkin"
+        ],
+        [
+          null,
+          null,
+          "oak_leaves",
+          "oak_leaves",
+          "bookshelf",
+          null,
+          null,
+          null,
+          "oxeye_daisy",
+          null
+        ]
+      ]
+    },
+    {
+      "z": 1,
+      "layers": [
+        [
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block",
+          "grass_block"
+        ]
+      ]
+    }
+  ]
+}

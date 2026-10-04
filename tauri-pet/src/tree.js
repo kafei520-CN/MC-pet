@@ -17,6 +17,8 @@ const petTree = selector([
   (ctx) => (ctx.windowGone ? 'window-gone' : null),
   (ctx) => (ctx.falling ? 'fall' : null),
   (ctx) => (ctx.phase === 'leap' ? 'leap' : null),
+  (ctx) => (ctx.climb ? 'climb' : null),
+  (ctx) => (ctx.phase === 'build' ? 'build' : null),
   (ctx) => (ctx.phase === 'look' ? 'look' : null),
   (ctx) => (ctx.locked ? 'menu' : null),
   (ctx) => (ctx.menuSleep && !ctx.sitting ? 'sleep' : null),
