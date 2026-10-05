@@ -212,11 +212,13 @@ function collectStands(ctx) {
     const x = col + 0.5
     for (const y of floorsAt(getSupport, ctx.isSolid, x)) {
       const stand = { x, y }
-      if (!spotClear(ctx, stand) || !canPlace(stand, block, getBlock)) {
-        continue
+      const clear = spotClear(ctx, stand)
+      const reach = canPlace(stand, block, getBlock)
+      const kind = clear && reach ? pathKind(getSupport, ctx.isSolid, feet, stand) : 'skip'
+      if (ctx.block?.id === 'oak_leaves' && ctx.block.x === 2 && col >= 0 && col <= 5) {
+        console.log('leaf', x, y, clear, reach, kind)
       }
-      const kind = pathKind(getSupport, ctx.isSolid, feet, stand)
-      if (kind !== 'walk' && kind !== 'jump') {
+      if (!clear || !reach || (kind !== 'walk' && kind !== 'jump')) {
         continue
       }
       stands.push({ x, y, kind })
