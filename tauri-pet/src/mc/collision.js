@@ -229,26 +229,6 @@ export function worldBoxes(block, x, y) {
       maxY: y + item.maxY,
       maxZ: 1,
     })
-    if (item.maxY - item.minY < 0.3) {
-      continue
-    }
-    const skin = 2 / 16
-    boxes.push({
-      minX: x + item.minX - skin,
-      minY: y + item.minY,
-      minZ: 0,
-      maxX: x + item.minX,
-      maxY: y + item.maxY,
-      maxZ: 1,
-    })
-    boxes.push({
-      minX: x + item.maxX,
-      minY: y + item.minY,
-      minZ: 0,
-      maxX: x + item.maxX + skin,
-      maxY: y + item.maxY,
-      maxZ: 1,
-    })
   }
   return boxes
 }

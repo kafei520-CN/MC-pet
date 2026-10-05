@@ -8,7 +8,7 @@ import {
   worldToScreen,
   workSize,
 } from './scale.js'
-import { visibleTopSpans } from './window-order.js'
+import { atScreenTop, visibleTopSpans } from './window-order.js'
 
 export const GRAVITY = 32
 export const JUMP_VY = 9
@@ -37,7 +37,7 @@ function windowPlatforms(windows, ignoreId) {
   const list = windows ?? []
   const platforms = []
   for (const win of list) {
-    if (!win || win.y < 100 || win.id === ignoreId) {
+    if (!win || atScreenTop(win) || win.id === ignoreId) {
       continue
     }
     const worldY = (height - win.y) / BLOCK_PX
@@ -253,7 +253,7 @@ export function supportScreenY(getBlock, windows, screenX, screenY, ignoreId) {
 function findClimbWall(solids, feet, face) {
   let best = null
   let bestRise = 0
-  for (const dist of [0.2, 0.35, 0.5, 0.7, 0.95]) {
+  for (const dist of [0.02, 0.08]) {
     const probe = playerBox(feet.x + face * dist, feet.y + 0.02)
     for (const solid of solids) {
       if (solid.platform || !overlap(probe, solid)) {
@@ -346,8 +346,6 @@ export function stepActor(actor, dt, ctx) {
     } else if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
       vy = JUMP_VY
       onGround = false
-    } else if (rise > JUMP_HEIGHT + 0.05) {
-      vx = 0
     }
   }
 

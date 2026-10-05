@@ -10,7 +10,7 @@ import { createDoll, grabNeck, releaseDoll, releaseNeck, stepDoll, syncDoll } fr
 import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
 import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
-import { frontCovers } from './mc/window-order.js'
+import { atScreenTop, frontCovers, seatAt, seatXOn } from './mc/window-order.js'
 import { lightLevels } from './mc/daylight.js'
 import { parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
@@ -25,7 +25,6 @@ import starterSchematic from './mc/schematic.json'
 
 const ANDROID = typeof window.PetBridge !== 'undefined'
 
-const TOP_LIMIT = 100
 const FEET = 16.25
 const SEAT = 4
 const HEAD = 12
@@ -327,10 +326,10 @@ function floorY() {
 }
 
 function nearBlockStand(x, y) {
-  if (!mcWorld) {
+  if (!mcWorld?.blockSupportScreenY) {
     return false
   }
-  const stand = mcWorld.supportScreenY(x, y)
+  const stand = mcWorld.blockSupportScreenY(x, y)
   return Math.abs(stand - y) < 64
 }
 
@@ -361,24 +360,7 @@ function pollSeat() {
 }
 
 function windowUnder(x, y, ignoreId) {
-  const bodyY = y + 96
-  for (const win of windows) {
-    if (win.id === ignoreId || win.y < TOP_LIMIT) {
-      continue
-    }
-    if (x < win.x || x > win.x + win.width) {
-      continue
-    }
-    const onBar = (probe) => probe >= win.y - 36 && probe <= win.y + 120
-    if (!(onBar(y) || onBar(bodyY))) {
-      continue
-    }
-    if (frontCovers(windows, x, win.y, win.id)) {
-      continue
-    }
-    return win
-  }
-  return null
+  return seatAt(windows, x, y, ignoreId)
 }
 
 function stillOver(id, x, y) {
@@ -398,20 +380,21 @@ function trySit(x, y, allowCurrent) {
   }
   avoidSeat = null
   const seat = windowUnder(x, y)
-  if (!seat) {
+  if (!seat || !sitOn(seat, x)) {
     return false
   }
   pressing = false
   holding = false
-  sitOn(seat, x)
   actions.handle('sit')
   return true
 }
 
 function sitOn(win, x) {
-  const min = win.x + 36
-  const max = Math.max(min, win.x + win.width - 36)
-  pet.x = Math.min(max, Math.max(min, x))
+  const at = seatXOn(win, windows, x)
+  if (at == null) {
+    return false
+  }
+  pet.x = at
   pet.seatOffset = pet.x - win.x
   pet.seatId = win.id
   ignoreSeatId = null
@@ -429,6 +412,7 @@ function sitOn(win, x) {
     doll = null
   }
   player.scale.set(SCALE, SCALE, SCALE)
+  return true
 }
 
 const SHAKE_NEED = 6
@@ -553,15 +537,12 @@ function followSeat() {
   const win = listed && liveSeat && liveSeat.id === listed.id
     ? { ...listed, x: liveSeat.x, y: liveSeat.y, width: liveSeat.width, height: liveSeat.height }
     : listed
-  if (!win || win.y < TOP_LIMIT) {
+  if (!win || atScreenTop(win)) {
     windowGone = true
     return
   }
-  const seatX = Math.min(
-    Math.max(win.x + 36, win.x + win.width - 36),
-    Math.max(win.x + 36, win.x + pet.seatOffset),
-  )
-  if (frontCovers(windows, seatX, win.y, win.id)) {
+  const seatX = seatXOn(win, windows, win.x + pet.seatOffset)
+  if (seatX == null || frontCovers(windows, seatX, win.y, win.id)) {
     windowGone = true
     return
   }
@@ -570,11 +551,29 @@ function followSeat() {
   if (phase === 'fling') {
     return
   }
-  const min = win.x + 36
-  const max = Math.max(min, win.x + win.width - 36)
-  pet.x = Math.min(max, Math.max(min, win.x + pet.seatOffset))
+  pet.x = seatX
   pet.y = win.y
   pet.mode = 'sit'
+}
+
+function catchSeat() {
+  if (pet.seatId || holding || falling || climb || phase) {
+    return
+  }
+  if (avoidSeat && stillOver(avoidSeat, pet.x, pet.y)) {
+    return
+  }
+  if (nearBlockStand(pet.x, pet.y)) {
+    return
+  }
+  const seat = windowUnder(pet.x, pet.y, ignoreSeatId)
+  if (!seat || Math.abs(pet.y - seat.y) > 28) {
+    return
+  }
+  if (!sitOn(seat, pet.x)) {
+    return
+  }
+  actions.handle('sit')
 }
 
 function beginWander() {
@@ -1377,6 +1376,7 @@ function place(delta) {
       if (!falling) {
         hideChicken()
       }
+      catchSeat()
     }
   } else if (falling) {
     pet.y = Math.min(floorY(), pet.y + 46 * delta)
@@ -1388,9 +1388,13 @@ function place(delta) {
         chicken.group.visible = false
       }
       actions.handle('drag-end')
+      catchSeat()
     }
   } else if (!holding && pet.mode === 'idle') {
     pet.y += (floorY() - pet.y) * Math.min(1, delta * 8)
+    if (Math.abs(floorY() - pet.y) < 2) {
+      catchSeat()
+    }
   }
   swing.x += (0 - swing.x) * Math.min(1, delta * 4)
   swing.z += (0 - swing.z) * Math.min(1, delta * 4)
@@ -1750,11 +1754,8 @@ function hopOffWindow() {
     ignoreSeatId = pet.seatId
     pet.seatId = null
   } else {
-    const under = windows.find((win) => (
-      pet.x >= win.x && pet.x <= win.x + win.width && Math.abs(pet.y - win.y) < 36
-      && !frontCovers(windows, pet.x, win.y, win.id)
-    ))
-    if (under) {
+    const under = windowUnder(pet.x, pet.y)
+    if (under && Math.abs(pet.y - under.y) < 48) {
       ignoreSeatId = under.id
     }
   }

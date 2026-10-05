@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { overlap, worldBoxes } from './collision.js'
 import { applyEntityMolang, createEntityModel } from './bedrock-pack.js'
+import { createJavaEntity } from './java-entity.js'
 import { eggType, isSpawnEgg } from './spawn-egg.js'
 
 function solidsNear(getBlock, x, y) {
@@ -18,8 +19,7 @@ function pose(mob) {
     return
   }
   mob.view.position.set(mob.x * 16, mob.y * 16, 8)
-  const dirX = mob.vx >= 0 ? 1 : -1
-  mob.view.rotation.y = Math.atan2(-dirX, 0)
+  mob.view.rotation.y = 0
 }
 
 function syncAnim(mob, dt) {
@@ -29,6 +29,11 @@ function syncAnim(mob, dt) {
   mob.life += dt
   mob.moved += Math.abs(mob.vx) * dt
   const speed = mob.vy === 0 ? Math.min(1, Math.abs(mob.vx) / 1.4) : 0
+  if (mob.model.kind === 'java') {
+    mob.model.animate(mob.moved, speed, mob.life)
+    pose(mob)
+    return
+  }
   applyEntityMolang(mob.model, mob.pre, {
     modified_distance_moved: mob.moved,
     modified_move_speed: speed,
@@ -80,7 +85,10 @@ export function createMobs(root) {
   async function attach(mob) {
     let built
     try {
-      built = await createEntityModel(mob.type)
+      built = await createJavaEntity(mob.type)
+      if (!built) {
+        built = await createEntityModel(mob.type)
+      }
     } catch (error) {
       console.error(error)
       return

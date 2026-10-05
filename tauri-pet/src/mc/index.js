@@ -310,6 +310,9 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     supportScreenY(screenX, screenY, ignoreWindowId) {
       return supportScreenY((x, y) => store.walkGet(x, y), getWindows?.() ?? [], screenX, screenY, ignoreWindowId)
     },
+    blockSupportScreenY(screenX, screenY) {
+      return supportScreenY((x, y) => store.walkGet(x, y), [], screenX, screenY)
+    },
     resolvePosition(screenX, screenY) {
       return resolveScreenPosition((x, y) => store.walkGet(x, y), screenX, screenY)
     },
