@@ -79,7 +79,7 @@ function floorsAt(getSupport, isSolid, x) {
 
 function solidAt(ctx) {
   const getSupport = ctx.getSupport ?? ctx.getBlock
-  return (x, y) => blocksRay(getSupport(x, y)) || blocksRay(ctx.getBlock(x, y))
+  return (x, y) => blocksRay(getSupport(x, y))
 }
 
 export function rayReaches(getBlock, x0, y0, x1, y1) {
@@ -212,13 +212,11 @@ function collectStands(ctx) {
     const x = col + 0.5
     for (const y of floorsAt(getSupport, ctx.isSolid, x)) {
       const stand = { x, y }
-      const clear = spotClear(ctx, stand)
-      const reach = canPlace(stand, block, getBlock)
-      const kind = clear && reach ? pathKind(getSupport, ctx.isSolid, feet, stand) : 'skip'
-      if (ctx.block?.id === 'oak_leaves' && ctx.block.x === 2 && col >= 0 && col <= 5) {
-        console.log('leaf', x, y, clear, reach, kind)
+      if (!spotClear(ctx, stand) || !canPlace(stand, block, getBlock)) {
+        continue
       }
-      if (!clear || !reach || (kind !== 'walk' && kind !== 'jump')) {
+      const kind = pathKind(getSupport, ctx.isSolid, feet, stand)
+      if (kind !== 'walk' && kind !== 'jump') {
         continue
       }
       stands.push({ x, y, kind })
@@ -272,9 +270,8 @@ const placeTree = selector([
   jumpNode,
 ])
 
-export function feetInside(feet, getSupport, getBlock) {
-  const isSolid = (x, y) => blocksRay(getSupport(x, y)) || blocksRay(getBlock(x, y))
-  return !bodyFits(isSolid, feet.x, feet.y)
+export function feetInside(feet, getSupport) {
+  return !bodyFits((x, y) => blocksRay(getSupport(x, y)), feet.x, feet.y)
 }
 
 export function choosePlaceStand(ctx) {

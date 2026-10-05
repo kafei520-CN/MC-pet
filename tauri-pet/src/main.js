@@ -11,7 +11,7 @@ import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
 import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
 import { lightLevels } from './mc/daylight.js'
-import { parseSchematic } from './mc/build.js'
+import { missingBlocks, parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
 import { swapDuration } from './mc/hotbar.js'
 import { createHotbarView } from './mc/hotbar-view.js'
@@ -612,11 +612,7 @@ async function stepBuild(delta) {
       wander = null
       return
     }
-    const buried = feetInside(
-      feet,
-      (x, y) => mcWorld.getBlock(x, y, 1),
-      (x, y) => mcWorld.getBlock(x, y, job.block.z ?? 0),
-    )
+    const buried = feetInside(feet, (x, y) => mcWorld.getBlock(x, y, 1))
     if (plan.move || buried) {
       const stand = worldToScreen(plan.stand.x, plan.stand.y)
       job.stage = 'walk'
@@ -1465,6 +1461,17 @@ createMc({
     }
     pet.onGround = true
     pet.vy = 0
+  }
+  if (!ANDROID && world?.blocks?.length && phase !== 'build') {
+    const missing = missingBlocks(world.blocks, starterSchematic)
+    if (missing.length) {
+      buildQueue = missing
+      buildJob = null
+      buildPlaced = 0
+      phase = 'build'
+      wander = null
+      pet.mode = 'idle'
+    }
   }
 }).catch((error) => {
   status.textContent = error instanceof Error ? error.message : String(error)

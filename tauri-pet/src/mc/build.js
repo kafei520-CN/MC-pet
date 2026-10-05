@@ -82,3 +82,13 @@ export function parseSchematic(json) {
   blocks.sort((a, b) => a.y - b.y || a.x - b.x || (a.z ?? 0) - (b.z ?? 0))
   return blocks
 }
+
+export function missingBlocks(existing, spec) {
+  const wanted = parseSchematic(spec)
+  const have = new Set((existing ?? []).map((block) => `${block.x},${block.y},${block.z ?? 0}:${block.id}`))
+  const spots = new Set((existing ?? []).map((block) => `${block.x},${block.y},${block.z ?? 0}`))
+  if (!wanted.some((block) => spots.has(`${block.x},${block.y},${block.z ?? 0}`))) {
+    return []
+  }
+  return wanted.filter((block) => !have.has(`${block.x},${block.y},${block.z ?? 0}:${block.id}`))
+}
