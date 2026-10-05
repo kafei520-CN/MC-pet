@@ -12,11 +12,12 @@ import {
 export const GRAVITY = 32
 export const JUMP_VY = 9
 export const WALK_SPEED = 2.8
-export const STEP_HEIGHT = 0.6
+export const STEP_HEIGHT = 0.5
 export const JUMP_HEIGHT = 1.25
 export const MAX_JUMP_RISE = 1
 export const WATER_GRAVITY = 8
 export const WATER_RISE = 6
+export const CHUTE_FALL = 2.2
 
 function playerBox(wx, wy) {
   const half = PLAYER_WIDTH / 2
@@ -126,7 +127,7 @@ export function depenetrate(aabb, solids, maxIter = 8) {
       const cy = (current.minY + current.maxY) / 2
       const sy = (hit.minY + hit.maxY) / 2
       const lift = hit.maxY - current.minY
-      if (lift > 0 && lift <= STEP_HEIGHT + 0.05 && cy >= sy) {
+      if (lift > 0 && lift <= STEP_HEIGHT + 0.02 && cy >= sy) {
         current = shiftBox(current, 0, lift + SEPARATE_EPS)
       } else {
         const push = bestOy + SEPARATE_EPS
@@ -291,7 +292,7 @@ export function stepActor(actor, dt, ctx) {
       continue
     }
     const lift = solid.maxY - aabb.minY
-    if (lift > 0 && lift <= STEP_HEIGHT + 0.05) {
+    if (lift > 0 && lift <= STEP_HEIGHT + 0.02) {
       aabb = shiftBox(aabb, 0, lift)
       feet.y += lift
       vy = Math.max(vy, 0)
@@ -314,6 +315,17 @@ export function stepActor(actor, dt, ctx) {
     vy -= WATER_GRAVITY * dt
     vy *= Math.max(0.4, 1 - dt * 2)
     vx *= 0.7
+  } else if (!onGround && ctx.parachute) {
+    const terminal = -CHUTE_FALL
+    if (vy < terminal) {
+      vy += (terminal - vy) * Math.min(1, dt * 9)
+    } else {
+      vy -= GRAVITY * 0.12 * dt
+      if (vy < terminal) {
+        vy = terminal
+      }
+    }
+    vx *= Math.max(0.15, 1 - dt * 2.4)
   } else if (!onGround) {
     vy -= GRAVITY * dt
   } else if (vy < 0) {
@@ -324,18 +336,13 @@ export function stepActor(actor, dt, ctx) {
   const climbWall = findClimbWall(solids, feet, face)
   if (wander && onGround && climbWall) {
     const rise = climbWall.maxY - feet.y
-    if (rise > 0.05 && rise <= STEP_HEIGHT + 0.01) {
+    if (rise > 0.05 && rise <= STEP_HEIGHT) {
       feet.y = climbWall.maxY
       aabb = playerBox(feet.x, feet.y)
-    } else if (rise > STEP_HEIGHT && rise <= MAX_JUMP_RISE + 0.05 && !climbWall.platform) {
-      vx = 0
-      const inset = PLAYER_WIDTH / 2 + 0.04
-      actor.climbHint = {
-        face,
-        landX: face >= 0 ? climbWall.minX + inset : climbWall.maxX - inset,
-        landY: climbWall.maxY,
-      }
-    } else if (rise > MAX_JUMP_RISE + 0.05) {
+    } else if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
+      vy = JUMP_VY
+      onGround = false
+    } else if (rise > JUMP_HEIGHT + 0.05) {
       vx = 0
     }
   }
@@ -358,13 +365,10 @@ export function stepActor(actor, dt, ctx) {
       const wall = findClimbWall(solids, nowFeet, face)
       if (wall) {
         const rise = wall.maxY - nowFeet.y
-        if (rise > STEP_HEIGHT && rise <= MAX_JUMP_RISE + 0.05 && !wall.platform) {
-          const inset = PLAYER_WIDTH / 2 + 0.04
-          actor.climbHint = {
-            face,
-            landX: face >= 0 ? wall.minX + inset : wall.maxX - inset,
-            landY: wall.maxY,
-          }
+        if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
+          vy = JUMP_VY
+          onGround = false
+          vx = face * WALK_SPEED
         }
       }
     }

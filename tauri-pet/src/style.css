@@ -42,3 +42,88 @@ body {
   pointer-events: none;
   image-rendering: pixelated;
 }
+
+body.controlling {
+  cursor: none;
+}
+
+#crosshair {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+  image-rendering: pixelated;
+  background: url('/resource-pack/minecraft/textures/gui/icons.png') 0 0 / 256px 256px no-repeat;
+}
+
+#pet-menu {
+  position: fixed;
+  z-index: 8;
+  min-width: 148px;
+  padding: 4px;
+  background: #2b2b2b;
+  border: 1px solid #5a5a5a;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+#pet-menu button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  color: #f2f2f2;
+  font: 13px "Segoe UI", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+#pet-menu button:hover {
+  background: #3d5a99;
+}
+
+#creative {
+  position: fixed;
+  z-index: 14;
+  pointer-events: auto;
+  image-rendering: pixelated;
+}
+
+#creative canvas.gui {
+  display: block;
+  image-rendering: pixelated;
+  cursor: pointer;
+}
+
+#creative canvas.doll {
+  position: absolute;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+#station {
+  position: fixed;
+  z-index: 15;
+  pointer-events: auto;
+  image-rendering: pixelated;
+}
+
+#station canvas {
+  display: block;
+  image-rendering: pixelated;
+  cursor: pointer;
+}
+
+.cursor-item {
+  position: fixed;
+  z-index: 16;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  image-rendering: pixelated;
+}

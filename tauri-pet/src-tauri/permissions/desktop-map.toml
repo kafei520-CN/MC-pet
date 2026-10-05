@@ -5,8 +5,10 @@ commands.allow = [
   "desktop_map",
   "seat_rect",
   "set_pointer_targets",
+  "set_overlay_focus",
   "load_pet_settings",
   "save_pet_settings",
   "load_world",
   "save_world",
+  "reset_world",
 ]

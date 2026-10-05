@@ -94,6 +94,28 @@ export function createHotbar() {
       const next = Number(saved.selected)
       selected = Number.isInteger(next) && next >= 0 && next < HOTBAR_SIZE ? next : 0
     },
+    selectedItem() {
+      return slots[selected]
+    },
+    setSlot(index, id) {
+      if (!Number.isInteger(index) || index < 0 || index >= HOTBAR_SIZE) {
+        return { selected, id: slots[selected] }
+      }
+      slots[index] = bareId(id) || null
+      return { selected, id: slots[selected] }
+    },
+    selectIndex(index) {
+      if (!Number.isInteger(index) || index < 0 || index >= HOTBAR_SIZE) {
+        return { selected, id: slots[selected] }
+      }
+      selected = index
+      return { selected, id: slots[selected] }
+    },
+    cycle(step) {
+      const delta = step >= 0 ? 1 : -1
+      selected = (selected + delta + HOTBAR_SIZE) % HOTBAR_SIZE
+      return { selected, id: slots[selected] }
+    },
     commit(id) {
       const name = bareId(id)
       if (!name) {

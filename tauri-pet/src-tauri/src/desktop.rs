@@ -164,6 +164,11 @@ fn obstacle_rect(hwnd: HWND, scan: &Scan) -> Option<(ScreenRect, String)> {
         if title == "MC桌宠" || title == "菜单" || title == "桌宠" {
             return None;
         }
+        let dock_title = title.eq_ignore_ascii_case("NxDock")
+            || title.to_ascii_lowercase().starts_with("nxdock");
+        if dock_title {
+            return None;
+        }
         Some((
             to_logical(raw, scan.scale, scan.origin_x, scan.origin_y),
             format!("{}", hwnd.0 as isize),

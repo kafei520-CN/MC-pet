@@ -1,5 +1,5 @@
 import { getAssets } from './assets.js'
-import { applySave, collisionAt, createStore, placeBlock, removeBlock, serialize, setBlockState } from './world.js'
+import { applySave, BACK_Z, collisionAt, createStore, FRONT_Z, placeBlock, removeBlock, serialize, setBlockState } from './world.js'
 import { rebuildWorld } from './render-world.js'
 import { createHandHolders, setHeldItem } from './items.js'
 import { createHotbar } from './hotbar.js'
@@ -17,6 +17,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
   const holders = bones ? createHandHolders(bones) : { right: null, left: null }
   const hands = { right: null, left: null }
   const hotbar = createHotbar()
+  let playerSlots = Array.from({ length: 27 }, () => null)
   let handle = null
   let rebuildTimer = 0
   let persistTimer = 0
@@ -74,6 +75,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     return {
       ...serialize(store, hands),
       hotbar: hotbar.save(),
+      inv: playerSlots.map((stack) => (stack ? { ...stack } : null)),
     }
   }
 
@@ -107,18 +109,119 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       }
       return result
     },
-    removeBlock(x, y) {
-      const result = removeBlock(store, x, y)
+    removeBlock(x, y, z = 0) {
+      const result = removeBlock(store, x, y, z)
       if (result.ok) {
         dirty()
       }
       return result
     },
+    cycleHotbar(step) {
+      const change = hotbar.cycle(step)
+      schedulePersist()
+      void hold('right', change.id)
+      return change
+    },
+    selectedBlock() {
+      return hotbar.selectedItem()
+    },
+    breakAt(screenX, screenY, layer = 'front') {
+      const z = layer === 'back' ? BACK_Z : FRONT_Z
+      const read = (x, y) => (z === FRONT_Z ? store.walkGet(x, y) : store.get(x, y, BACK_Z))
+      const hit = hitTest(read, screenX, screenY)
+      const world = screenToWorld(screenX, screenY)
+      const front = hitTest((x, y) => store.walkGet(x, y), screenX, screenY)
+      const cell = hit || (layer === 'back' && front) || {
+        x: Math.floor(world.x),
+        y: Math.floor(world.y),
+      }
+      if (!read(cell.x, cell.y)) {
+        return null
+      }
+      const result = removeBlock(store, cell.x, cell.y, z)
+      if (result.ok) {
+        dirty()
+      }
+      return result
+    },
+    placeAt(screenX, screenY, fromX, fromY, layer = 'front') {
+      const id = hotbar.selectedItem()
+      if (!id) {
+        return null
+      }
+      const z = layer === 'back' ? BACK_Z : FRONT_Z
+      const world = screenToWorld(screenX, screenY)
+      const read = (x, y) => (z === FRONT_Z ? store.walkGet(x, y) : store.get(x, y, BACK_Z))
+      const hit = hitTest(read, screenX, screenY)
+      const front = hitTest((x, y) => store.walkGet(x, y), screenX, screenY)
+      let x = Math.floor(world.x)
+      let y = Math.floor(world.y)
+      if (layer === 'back') {
+        const behind = front || hit
+        if (behind) {
+          x = behind.x
+          y = behind.y
+        }
+      } else if (hit) {
+        const fx = world.x - hit.x
+        const fy = world.y - hit.y
+        const faces = [
+          { gap: fx, x: hit.x - 1, y: hit.y },
+          { gap: 1 - fx, x: hit.x + 1, y: hit.y },
+          { gap: fy, x: hit.x, y: hit.y - 1 },
+          { gap: 1 - fy, x: hit.x, y: hit.y + 1 },
+        ]
+        faces.sort((a, b) => a.gap - b.gap)
+        x = faces[0].x
+        y = faces[0].y
+      }
+      if (Number.isFinite(fromX) && Number.isFinite(fromY)) {
+        const origin = screenToWorld(fromX, fromY)
+        const dx = x + 0.5 - origin.x
+        const dy = y + 0.5 - origin.y
+        if (Math.hypot(dx, dy) > 5) {
+          return null
+        }
+      }
+      if (read(x, y)) {
+        return null
+      }
+      return placeBlock(store, x, y, id, {}, undefined, z).then((result) => {
+        if (result.ok) {
+          dirty()
+        }
+        return result
+      })
+    },
     getBlock(x, y, z) {
       return store.get(x, y, z)
     },
-    setBlockState(x, y, properties, nbt) {
-      const result = setBlockState(store, x, y, properties, nbt)
+    playerItems() {
+      return playerSlots.map((stack) => (stack ? { ...stack } : null))
+    },
+    writePlayer(slots) {
+      playerSlots = Array.from({ length: 27 }, (_, index) => {
+        const stack = slots?.[index]
+        if (!stack?.id || stack.count < 1) {
+          return null
+        }
+        return { id: String(stack.id).replace(/^minecraft:/, ''), count: Math.min(64, Math.floor(stack.count)) }
+      })
+      schedulePersist()
+    },
+    writeContainer(x, y, z, nbt) {
+      const block = store.get(x, y, z)
+      if (!block) {
+        return { ok: false }
+      }
+      const result = setBlockState(store, x, y, {}, { ...(block.nbt ?? {}), ...nbt }, z)
+      if (result.ok) {
+        dirty()
+      }
+      return result
+    },
+    setBlockState(x, y, properties, nbt, z = 0) {
+      const result = setBlockState(store, x, y, properties, nbt, z)
       if (result.ok) {
         dirty()
       }
@@ -157,6 +260,20 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     commitHotbar(id) {
       const change = hotbar.commit(id)
       schedulePersist()
+      void hold('right', change.id)
+      return change
+    },
+    setHotbarSlot(index, id) {
+      hotbar.setSlot(index, id)
+      schedulePersist()
+      if (hotbar.state().selected === index) {
+        void hold('right', hotbar.selectedItem())
+      }
+    },
+    selectHotbar(index) {
+      const change = hotbar.selectIndex(index)
+      schedulePersist()
+      void hold('right', change.id)
       return change
     },
     offhandItem(id, components) {
@@ -205,6 +322,13 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     },
     async loadSave(data) {
       hotbar.read(data?.hotbar, data?.hand?.id)
+      playerSlots = Array.from({ length: 27 }, (_, index) => {
+        const stack = data?.inv?.[index]
+        if (!stack?.id || stack.count < 1) {
+          return null
+        }
+        return { id: String(stack.id).replace(/^minecraft:/, ''), count: Math.min(64, Math.floor(stack.count)) }
+      })
       await batch(async () => {
         applySave(store, data)
         if (data?.hand?.id) {

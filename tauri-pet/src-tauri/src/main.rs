@@ -227,21 +227,53 @@ fn raise_above_taskbar(window: &tauri::WebviewWindow) {
     }
 }
 
+
+#[tauri::command]
+fn set_overlay_focus(app: tauri::AppHandle, capture: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "missing window".to_string())?;
+    window.set_focusable(capture).map_err(|err| err.to_string())?;
+    if capture {
+        window.set_focus().map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+fn delete_world_files(app: &tauri::AppHandle) {
+    if let Ok(path) = world_path(app) {
+        let _ = std::fs::remove_file(&path);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    if let Ok(legacy) = legacy_world_path(app) {
+        let _ = std::fs::remove_file(legacy);
+    }
+}
+
+#[tauri::command]
+fn reset_world(app: tauri::AppHandle) -> Result<(), String> {
+    delete_world_files(&app);
+    Ok(())
+}
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             desktop_map,
             seat_rect,
             set_pointer_targets,
+            set_overlay_focus,
             load_pet_settings,
             save_pet_settings,
             load_world,
-            save_world
+            save_world,
+            reset_world
         ])
         .setup(|app| {
             let open_menu = MenuItem::with_id(app, "open-menu", "打开菜单", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_menu, &quit])?;
+            let reset_world_item = MenuItem::with_id(app, "reset-world", "删除存档并热重载", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_menu, &reset_world_item, &quit])?;
             let mut tray = TrayIconBuilder::new()
                 .tooltip("MC桌宠")
                 .menu(&menu)
@@ -251,6 +283,11 @@ fn main() {
                             let _ = window.show();
                             let _ = window.unminimize();
                             let _ = window.set_focus();
+                        }
+                    }
+                                        if event.id() == "reset-world" {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.eval("window.__resetAndReload && window.__resetAndReload()");
                         }
                     }
                     if event.id() == "quit" {
