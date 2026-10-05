@@ -2,12 +2,44 @@ import { createScene, poseSpecial } from 'block-model-renderer'
 import { getAssets, MC_VERSION, PLAINS } from './assets.js'
 import { isChest } from './ids.js'
 
+const GROUND_SHADE = 0.78
+
 export async function rebuildWorld(root, blocks, previous) {
   previous?.dispose?.()
   if (!blocks.length) {
     return null
   }
   const assets = await getAssets()
+  const ground = await buildLayer(assets, blocks.filter((block) => block.y === 0), GROUND_SHADE)
+  const upper = await buildLayer(assets, blocks.filter((block) => block.y !== 0), 1)
+  const handles = [ground, upper].filter(Boolean)
+  if (!handles.length) {
+    return null
+  }
+  for (const handle of handles) {
+    root.add(handle.group)
+    applySpecialPoses(handle.group, blocks)
+  }
+  return {
+    group: root,
+    dispose() {
+      for (const handle of handles) {
+        root.remove(handle.group)
+        handle.dispose?.()
+      }
+    },
+    sortTranslucent(camera) {
+      for (const handle of handles) {
+        handle.sortTranslucent?.(camera)
+      }
+    },
+  }
+}
+
+async function buildLayer(assets, blocks, shade) {
+  if (!blocks.length) {
+    return null
+  }
   const entries = blocks.map((block) => ({
     id: block.id,
     properties: block.properties ?? {},
@@ -27,9 +59,27 @@ export async function rebuildWorld(root, blocks, previous) {
   if (!handle) {
     return null
   }
-  root.add(handle.group)
-  applySpecialPoses(handle.group, blocks)
+  if (shade < 1) {
+    darken(handle.group, shade)
+  }
   return handle
+}
+
+function darken(group, amount) {
+  group.traverse((node) => {
+    if (!node.material) {
+      return
+    }
+    const list = Array.isArray(node.material) ? node.material : [node.material]
+    const copies = list.map((material) => {
+      const copy = material.clone()
+      if (copy.color) {
+        copy.color.multiplyScalar(amount)
+      }
+      return copy
+    })
+    node.material = Array.isArray(node.material) ? copies : copies[0]
+  })
 }
 
 function applySpecialPoses(group, blocks) {
