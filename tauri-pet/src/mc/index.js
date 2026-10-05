@@ -2,6 +2,7 @@ import { getAssets } from './assets.js'
 import { applySave, collisionAt, createStore, placeBlock, removeBlock, serialize, setBlockState } from './world.js'
 import { rebuildWorld } from './render-world.js'
 import { createHandHolders, setHeldItem } from './items.js'
+import { createHotbar } from './hotbar.js'
 import { blockScreenRects, hitTest } from './hit.js'
 import { resolveScreenPosition, resolveSpawn, spawnBlocked, stepActor, supportScreenY } from './move.js'
 import { BLOCK_PX, layoutWorldRoot, screenToWorld } from './scale.js'
@@ -15,6 +16,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
   layoutWorldRoot(root)
   const holders = bones ? createHandHolders(bones) : { right: null, left: null }
   const hands = { right: null, left: null }
+  const hotbar = createHotbar()
   let handle = null
   let rebuildTimer = 0
   let persistTimer = 0
@@ -46,7 +48,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     }
     window.clearTimeout(persistTimer)
     persistTimer = window.setTimeout(() => {
-      onPersist(serialize(store, hands))
+      onPersist(snapshot())
     }, 50)
   }
 
@@ -68,10 +70,25 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     }
   }
 
+  function snapshot() {
+    return {
+      ...serialize(store, hands),
+      hotbar: hotbar.save(),
+    }
+  }
+
   async function hold(side, id, components) {
     const holder = side === 'left' ? holders.left : holders.right
     if (!holder) {
       return { ok: false, error: 'no skeleton' }
+    }
+    const current = hands[side]
+    const name = id || null
+    const sameId = (name && current?.id === name) || (!name && !current)
+    const sameData = components === undefined
+      || JSON.stringify(current?.components ?? {}) === JSON.stringify(components ?? {})
+    if (sameId && sameData) {
+      return { ok: true, id: name, unchanged: true }
     }
     const result = await setHeldItem(holder, id, components, side)
     if (result.ok) {
@@ -134,6 +151,14 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
     holdItem(id, components) {
       return hold('right', id, components)
     },
+    hotbarState() {
+      return hotbar.state()
+    },
+    commitHotbar(id) {
+      const change = hotbar.commit(id)
+      schedulePersist()
+      return change
+    },
     offhandItem(id, components) {
       return hold('left', id, components)
     },
@@ -176,9 +201,10 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       return store.cells.size === 0
     },
     getSave() {
-      return serialize(store, hands)
+      return snapshot()
     },
     async loadSave(data) {
+      hotbar.read(data?.hotbar, data?.hand?.id)
       await batch(async () => {
         applySave(store, data)
         if (data?.hand?.id) {

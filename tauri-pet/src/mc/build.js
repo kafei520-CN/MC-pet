@@ -1,4 +1,4 @@
-import { BLOCK_PX, gridSize, screenToWorld, worldToScreen } from './scale.js'
+import { gridSize } from './scale.js'
 
 function cellId(cell) {
   if (!cell) {
@@ -81,42 +81,4 @@ export function parseSchematic(json) {
   }
   blocks.sort((a, b) => a.y - b.y || a.x - b.x || (a.z ?? 0) - (b.z ?? 0))
   return blocks
-}
-
-export function blockScreenX(block) {
-  return worldToScreen(block.x + 0.5, 0).x
-}
-
-export function standScreenX(block, getBlock) {
-  if (getBlock?.(block.x - 1, block.y)) {
-    return worldToScreen(block.x - 0.15, 0).x
-  }
-  if (getBlock?.(block.x + 1, block.y)) {
-    return worldToScreen(block.x + 1.15, 0).x
-  }
-  return worldToScreen(block.x + 0.5, 0).x
-}
-
-export function blockReach() {
-  return BLOCK_PX * 0.95
-}
-
-export function placeGap(block, screenX) {
-  const here = screenToWorld(screenX, 0)
-  return Math.abs(here.x - (block.x + 0.5))
-}
-
-export function approachScreenX(block, screenX) {
-  const here = screenToWorld(screenX, 0)
-  const goal = block.x + 0.5
-  const gap = here.x - goal
-  if (Math.abs(gap) < 0.2) {
-    return screenX
-  }
-  const sign = gap > 0 ? 1 : -1
-  return worldToScreen(goal + sign * 0.15, 0).x
-}
-
-export function standOnPlaced(block) {
-  return worldToScreen(block.x + 0.5, block.y + 1).y
 }

@@ -33,3 +33,12 @@ body {
   font: 13px sans-serif;
   pointer-events: none;
 }
+
+#hotbar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  image-rendering: pixelated;
+}

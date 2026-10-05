@@ -9,9 +9,13 @@ import { choosePetAction } from './tree.js'
 import { createDoll, grabNeck, releaseDoll, releaseNeck, stepDoll, syncDoll } from './ragdoll.js'
 import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
-import { BLOCK_PX, SCALE, worldToScreen } from './mc/scale.js'
+import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
 import { lightLevels } from './mc/daylight.js'
-import { approachScreenX, blockScreenX, parseSchematic, placeGap, standOnPlaced, standScreenX } from './mc/build.js'
+import { parseSchematic } from './mc/build.js'
+import { choosePlaceStand, feetInside } from './mc/place-tree.js'
+import { swapDuration } from './mc/hotbar.js'
+import { createHotbarView } from './mc/hotbar-view.js'
+import { applySwapArm } from './mc/swap-arm.js'
 import starterSchematic from './mc/schematic.json'
 
 const ANDROID = typeof window.PetBridge !== 'undefined'
@@ -108,6 +112,9 @@ const look = { yaw: 0, pitch: 0 }
 const faceYaw = { current: 0 }
 const pointer = { x: 180, y: 200 }
 const headPoint = new THREE.Vector3()
+const headTop = new THREE.Vector3()
+const hotbarView = createHotbarView()
+let swapAnim = null
 let windows = []
 let holding = false
 let pressing = false
@@ -133,6 +140,7 @@ let ignoreSeatId = null
 let buildQueue = []
 let buildJob = null
 let buildBusy = false
+let buildPlaced = 0
 let climb = null
 let seatMotion = null
 let shakeCount = 0
@@ -490,8 +498,8 @@ function beginClimb(hint) {
   const land = worldToScreen(hint.landX, hint.landY)
   climb = {
     t: 0,
-    crouch: 0.5,
-    duration: 1.55,
+    crouch: 0.62,
+    duration: 1.28,
     fromX: pet.x,
     fromY: pet.y,
     toX: land.x,
@@ -518,9 +526,17 @@ function stepClimb(delta) {
     return
   }
   const u = (climb.t - climb.crouch) / (climb.duration - climb.crouch)
-  const ease = u * u * (3 - 2 * u)
+  const ease = u * u
+  const peak = 0.36
+  let hop = 0
+  if (u <= peak) {
+    const rise = u / peak
+    hop = rise * rise * 32
+  } else {
+    const fall = (u - peak) / (1 - peak)
+    hop = (1 - fall * fall) * 32
+  }
   pet.x = climb.fromX + (climb.toX - climb.fromX) * ease
-  const hop = Math.sin(Math.PI * u) * 28
   pet.y = climb.fromY + (climb.toY - climb.fromY) * ease - hop
 }
 
@@ -546,6 +562,7 @@ function startBuild(json) {
   buildQueue = parseSchematic(json || starterSchematic)
   buildJob = null
   buildBusy = false
+  buildPlaced = 0
   phase = 'build'
   phaseTime = 0
   wander = null
@@ -559,6 +576,7 @@ async function stepBuild(delta) {
   if (!buildJob) {
     if (!buildQueue.length) {
       phase = null
+      swapAnim = null
       pet.mode = 'idle'
       await mcWorld.holdItem(null)
       return
@@ -575,31 +593,71 @@ async function stepBuild(delta) {
     return
   }
   const job = buildJob
-  if (job.stage !== 'swing' && placeGap(job.block, pet.x) >= 0.2) {
-    job.stage = 'walk'
-    job.settled = false
-    job.t = 0
-    job.targetX = approachScreenX(job.block, pet.x)
-    const dx = job.targetX - pet.x
-    wander = { targetX: job.targetX, face: dx > 0 ? 1 : -1 }
-    return
-  }
-  if (job.stage === 'walk') {
+  if (job.stage === 'walk' || !job.stage) {
+    const feet = screenToWorld(pet.x, pet.y)
+    const plan = choosePlaceStand({
+      feet,
+      block: job.block,
+      getBlock: (x, y) => mcWorld.getBlock(x, y, job.block.z ?? 0),
+      getSupport: (x, y) => mcWorld.getBlock(x, y, 1),
+    })
+    if (!plan) {
+      if (job.block.retried && job.block.seenPlaced === buildPlaced) {
+        buildJob = null
+        wander = null
+        return
+      }
+      buildQueue.push({ ...job.block, retried: true, seenPlaced: buildPlaced })
+      buildJob = null
+      wander = null
+      return
+    }
+    const buried = feetInside(
+      feet,
+      (x, y) => mcWorld.getBlock(x, y, 1),
+      (x, y) => mcWorld.getBlock(x, y, job.block.z ?? 0),
+    )
+    if (plan.move || buried) {
+      const stand = worldToScreen(plan.stand.x, plan.stand.y)
+      job.stage = 'walk'
+      job.face = plan.face
+      job.settled = false
+      if (buried) {
+        pet.x = stand.x
+        pet.y = stand.y
+        pet.vy = 0
+        pet.onGround = true
+        wander = null
+        return
+      }
+      wander = { targetX: stand.x, face: stand.x >= pet.x ? 1 : -1 }
+      return
+    }
     wander = null
-    job.face = blockScreenX(job.block) >= pet.x ? 1 : -1
+    job.face = plan.face
     if (!job.settled) {
       job.settled = true
+      job.stage = 'walk'
       return
     }
     job.stage = 'hold'
     job.t = 0
-    buildBusy = true
-    await mcWorld.holdItem(job.block.id)
-    buildBusy = false
+    if (!job.committed) {
+      job.committed = true
+      const change = mcWorld.commitHotbar(job.block.id)
+      job.swapHold = change.direction ? swapDuration(change.distance) : 0.12
+      job.holdReady = false
+      if (change.direction) {
+        swapAnim = { t: 0, duration: job.swapHold, direction: change.direction }
+      }
+      mcWorld.holdItem(change.id).finally(() => {
+        job.holdReady = true
+      })
+    }
     return
   }
   job.t += delta
-  if (job.stage === 'hold' && job.t > 0.12) {
+  if (job.stage === 'hold' && job.t > (job.swapHold ?? 0.12) && job.holdReady) {
     job.stage = 'swing'
     job.t = 0
     poseTime = 0
@@ -611,7 +669,7 @@ async function stepBuild(delta) {
       job.placed = true
       buildBusy = true
       await mcWorld.placeBlock(job.block.x, job.block.y, job.block.id, job.block.properties, undefined, job.block.z ?? 0)
-      pet.y = standOnPlaced(job.block)
+      buildPlaced += 1
       pet.vy = 0
       pet.onGround = true
       buildBusy = false
@@ -743,6 +801,7 @@ let frameChoice = 'idle'
 
 function applyPose(delta) {
   if (holding) {
+    swapAnim = null
     menuSleep = false
     falling = false
     windowGone = false
@@ -769,6 +828,14 @@ function applyPose(delta) {
     player.position.y = FEET * SCALE + standLift
   }
   playClip(bones, clip, poseTime, swing)
+  if (swapAnim) {
+    const u = Math.min(1, swapAnim.t / swapAnim.duration)
+    applySwapArm(bones.leftArm, player.rotation.y + rig.rotation.y, swapAnim.direction, u)
+    swapAnim.t += delta
+    if (swapAnim.t >= swapAnim.duration) {
+      swapAnim = null
+    }
+  }
   if (phase === 'build') {
     bones.head.rotation.x = 0
   }
@@ -926,7 +993,23 @@ function place(delta) {
   applyDaylight()
   rig.position.set(pet.x, -pet.y, BLOCK_PX)
   applyPose(delta)
+  updateHotbar(delta)
   rig.position.z = BLOCK_PX
+}
+
+function updateHotbar(delta) {
+  if (mcWorld) {
+    hotbarView.sync(mcWorld.hotbarState())
+  }
+  hotbarView.tick(delta)
+  const show = phase === 'build' && !hidden && rig.visible
+  hotbarView.setVisible(show)
+  if (!show) {
+    return
+  }
+  headTop.set(0, 9, 0)
+  bones.head.localToWorld(headTop)
+  hotbarView.place(headTop.x, -headTop.y)
 }
 
 function bodyHeight() {
