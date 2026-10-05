@@ -16,6 +16,7 @@ import {
   isTrapdoor,
   isWall,
 } from './ids.js'
+import { cachedModelBoxes, primeModelBoxes } from './model-boxes.js'
 
 function box(minX, minY, minZ, maxX, maxY, maxZ) {
   return { minX, minY, minZ, maxX, maxY, maxZ }
@@ -181,6 +182,13 @@ export function localBoxes(block) {
   }
   if (isTrapdoor(id)) {
     return trapdoorBoxes(block)
+  }
+  const modeled = cachedModelBoxes(id, block.properties)
+  if (Array.isArray(modeled) && modeled.length) {
+    return modeled
+  }
+  if (modeled === undefined) {
+    primeModelBoxes(id, block.properties)
   }
   if (isCarpet(id) || id === 'moss_carpet') {
     return [box(0, 0, 0, 1, 1 / 16, 1)]

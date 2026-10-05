@@ -90,11 +90,14 @@ body.controlling {
 #creative {
   position: fixed;
   z-index: 14;
+  overflow: visible;
   pointer-events: auto;
   image-rendering: pixelated;
 }
 
 #creative canvas.gui {
+  position: relative;
+  z-index: 0;
   display: block;
   image-rendering: pixelated;
   cursor: pointer;
@@ -102,8 +105,37 @@ body.controlling {
 
 #creative canvas.doll {
   position: absolute;
+  z-index: 1;
   pointer-events: none;
   image-rendering: auto;
+}
+
+#creative .creative-search {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #3f3f3f;
+  caret-color: #3f3f3f;
+  font: 16px "Segoe UI", sans-serif;
+  outline: none;
+}
+
+.mc-tooltip {
+  position: fixed;
+  z-index: 18;
+  padding: 4px 6px;
+  background: #100010;
+  color: #ffffff;
+  border: 2px solid #21007f;
+  box-shadow: 0 0 0 1px #100010;
+  font: 16px "Segoe UI", sans-serif;
+  text-shadow: 2px 2px #3e3e3e;
+  pointer-events: none;
+  white-space: nowrap;
+  image-rendering: pixelated;
 }
 
 #station {

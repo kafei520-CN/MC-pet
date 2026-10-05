@@ -1,5 +1,6 @@
 import { extraCells, partnerCells, touchNeighbors } from './connect.js'
 import { localBoxes, worldBoxes } from './collision.js'
+import { primeModelBoxes } from './model-boxes.js'
 import { normalizeFluidId, updateFluids } from './fluids.js'
 import { blockExists } from './assets.js'
 import { bareId, isDoor, isFluid } from './ids.js'
@@ -111,6 +112,7 @@ export async function placeBlock(store, x, y, id, properties = {}, nbt, z = 0) {
   if (isFluid(name)) {
     updateFluids(get, set, bx, by)
   }
+  await primeModelBoxes(name, properties)
   return { ok: true, placed: cells }
 }
 
@@ -186,12 +188,14 @@ export function applySave(store, data) {
   store.clear()
   const blocks = data?.blocks ?? []
   for (const block of blocks) {
+    const properties = block.p ?? block.properties ?? {}
     store.set(block.x, block.y, {
       id: block.id,
-      properties: block.p ?? block.properties ?? {},
+      properties,
       nbt: block.n ?? block.nbt,
       z: block.z ?? 0,
     }, block.z ?? 0)
+    primeModelBoxes(block.id, properties)
   }
 }
 

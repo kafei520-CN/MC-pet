@@ -1,5 +1,4 @@
-import { DISPLAYS, renderBlock, renderItem } from 'block-model-renderer'
-import { blockExists, getAssets, MC_VERSION, PLAINS } from './assets.js'
+import { drawGuiIcon, renderGuiIcon } from './icon.js'
 import { selectDuration } from './hotbar.js'
 
 const GUI = 2
@@ -20,36 +19,8 @@ function smooth(value) {
   return t * t * (3 - 2 * t)
 }
 
-const BLOCK_ICON = {
-  ...DISPLAYS.block,
-  rotateFlat: true,
-}
-
-async function renderIcon(id) {
-  const assets = await getAssets()
-  const size = ICON * GUI
-  if (await blockExists(id)) {
-    return renderBlock({
-      id,
-      assets,
-      width: size,
-      height: size,
-      version: MC_VERSION,
-      biome: PLAINS,
-      defaults: 'game',
-      lighting: 'item',
-      display: BLOCK_ICON,
-    })
-  }
-  return renderItem({
-    id,
-    assets,
-    width: size,
-    height: size,
-    version: MC_VERSION,
-    lighting: 'item',
-    display: { type: 'fallback', display: 'gui', generated: false },
-  })
+function renderIcon(id) {
+  return renderGuiIcon(id, ICON * GUI)
 }
 
 export function createHotbarView() {
@@ -113,6 +84,9 @@ export function createHotbarView() {
     iconChain = iconChain.then(async () => {
       try {
         const image = await renderIcon(id)
+        if (!image) {
+          return
+        }
         icons.set(id, image)
         paint()
       } catch (error) {
@@ -146,9 +120,7 @@ export function createHotbarView() {
       if (!icon) {
         continue
       }
-      const dx = (PAD + 3 + index * PITCH) * scale
-      const dy = (PAD + 3) * scale
-      ctx.drawImage(icon, dx, dy, ICON * scale, ICON * scale)
+      drawGuiIcon(ctx, icon, PAD + 2 + index * PITCH, PAD + 2, scale)
     }
     const slot = displayed()
     ctx.drawImage(

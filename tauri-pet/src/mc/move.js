@@ -8,6 +8,7 @@ import {
   worldToScreen,
   workSize,
 } from './scale.js'
+import { visibleTopSpans } from './window-order.js'
 
 export const GRAVITY = 32
 export const JUMP_VY = 9
@@ -33,22 +34,25 @@ function playerBox(wx, wy) {
 
 function windowPlatforms(windows, ignoreId) {
   const { height } = workSize()
+  const list = windows ?? []
   const platforms = []
-  for (const win of windows ?? []) {
+  for (const win of list) {
     if (!win || win.y < 100 || win.id === ignoreId) {
       continue
     }
     const worldY = (height - win.y) / BLOCK_PX
-    platforms.push({
-      minX: win.x / BLOCK_PX,
-      maxX: (win.x + win.width) / BLOCK_PX,
-      minY: worldY - 0.08,
-      maxY: worldY,
-      minZ: 0,
-      maxZ: 1,
-      platform: true,
-      windowId: win.id,
-    })
+    for (const [left, right] of visibleTopSpans(win, list)) {
+      platforms.push({
+        minX: left / BLOCK_PX,
+        maxX: right / BLOCK_PX,
+        minY: worldY - 0.08,
+        maxY: worldY,
+        minZ: 0,
+        maxZ: 1,
+        platform: true,
+        windowId: win.id,
+      })
+    }
   }
   return platforms
 }

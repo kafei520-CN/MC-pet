@@ -1,5 +1,4 @@
-import { DISPLAYS, renderBlock, renderItem } from 'block-model-renderer'
-import { blockExists, getAssets, MC_VERSION, PLAINS } from './assets.js'
+import { drawGuiIcon, renderGuiIcon } from './icon.js'
 import { fuelTime, loadRecipes, matchCook, matchCraft, matchSmithing } from './recipes.js'
 import {
   containerSize,
@@ -10,33 +9,9 @@ import {
 } from './stations.js'
 
 const SCALE = 2
-const BLOCK_ICON = { ...DISPLAYS.block, rotateFlat: true }
 
-async function renderIcon(id) {
-  const assets = await getAssets()
-  const size = 16 * SCALE
-  if (await blockExists(id)) {
-    return renderBlock({
-      id,
-      assets,
-      width: size,
-      height: size,
-      version: MC_VERSION,
-      biome: PLAINS,
-      defaults: 'game',
-      lighting: 'item',
-      display: BLOCK_ICON,
-    })
-  }
-  return renderItem({
-    id,
-    assets,
-    width: size,
-    height: size,
-    version: MC_VERSION,
-    lighting: 'item',
-    display: { type: 'fallback', display: 'gui', generated: false },
-  })
+function renderIcon(id) {
+  return renderGuiIcon(id, 16 * SCALE)
 }
 
 export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
@@ -80,7 +55,11 @@ export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
     jobs.set(id, true)
     chain = chain.then(async () => {
       try {
-        icons.set(id, await renderIcon(id))
+        const image = await renderIcon(id)
+        if (!image) {
+          return
+        }
+        icons.set(id, image)
         paint()
       } catch (error) {
         console.error(error)
@@ -210,7 +189,7 @@ export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
       if (!icon) {
         continue
       }
-      ctx.drawImage(icon, (slot.x + 1) * SCALE, (slot.y + 1) * SCALE, 16 * SCALE, 16 * SCALE)
+      drawGuiIcon(ctx, icon, slot.x, slot.y, SCALE)
       if (shown.count > 1) {
         ctx.font = `${8 * SCALE}px "Segoe UI", sans-serif`
         ctx.fillStyle = '#3f3f3f'

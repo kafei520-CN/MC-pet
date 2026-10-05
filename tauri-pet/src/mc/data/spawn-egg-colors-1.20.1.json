@@ -1,0 +1,310 @@
+{
+  "allay_spawn_egg": {
+    "bg": 56063,
+    "fg": 44543
+  },
+  "axolotl_spawn_egg": {
+    "bg": 16499171,
+    "fg": 10890612
+  },
+  "bat_spawn_egg": {
+    "bg": 4996656,
+    "fg": 986895
+  },
+  "bee_spawn_egg": {
+    "bg": 15582019,
+    "fg": 4400155
+  },
+  "blaze_spawn_egg": {
+    "bg": 16167425,
+    "fg": 16775294
+  },
+  "cat_spawn_egg": {
+    "bg": 15714446,
+    "fg": 9794134
+  },
+  "camel_spawn_egg": {
+    "bg": 16565097,
+    "fg": 13341495
+  },
+  "cave_spider_spawn_egg": {
+    "bg": 803406,
+    "fg": 11013646
+  },
+  "chicken_spawn_egg": {
+    "bg": 10592673,
+    "fg": 16711680
+  },
+  "cod_spawn_egg": {
+    "bg": 12691306,
+    "fg": 15058059
+  },
+  "cow_spawn_egg": {
+    "bg": 4470310,
+    "fg": 10592673
+  },
+  "creeper_spawn_egg": {
+    "bg": 894731,
+    "fg": 0
+  },
+  "dolphin_spawn_egg": {
+    "bg": 2243405,
+    "fg": 16382457
+  },
+  "donkey_spawn_egg": {
+    "bg": 5457209,
+    "fg": 8811878
+  },
+  "drowned_spawn_egg": {
+    "bg": 9433559,
+    "fg": 7969893
+  },
+  "elder_guardian_spawn_egg": {
+    "bg": 13552826,
+    "fg": 7632531
+  },
+  "ender_dragon_spawn_egg": {
+    "bg": 1842204,
+    "fg": 14711290
+  },
+  "enderman_spawn_egg": {
+    "bg": 1447446,
+    "fg": 0
+  },
+  "endermite_spawn_egg": {
+    "bg": 1447446,
+    "fg": 7237230
+  },
+  "evoker_spawn_egg": {
+    "bg": 9804699,
+    "fg": 1973274
+  },
+  "fox_spawn_egg": {
+    "bg": 14005919,
+    "fg": 13396256
+  },
+  "frog_spawn_egg": {
+    "bg": 13661252,
+    "fg": 16762748
+  },
+  "ghast_spawn_egg": {
+    "bg": 16382457,
+    "fg": 12369084
+  },
+  "glow_squid_spawn_egg": {
+    "bg": 611926,
+    "fg": 8778172
+  },
+  "goat_spawn_egg": {
+    "bg": 10851452,
+    "fg": 5589310
+  },
+  "guardian_spawn_egg": {
+    "bg": 5931634,
+    "fg": 15826224
+  },
+  "hoglin_spawn_egg": {
+    "bg": 13004373,
+    "fg": 6251620
+  },
+  "horse_spawn_egg": {
+    "bg": 12623485,
+    "fg": 15656192
+  },
+  "husk_spawn_egg": {
+    "bg": 7958625,
+    "fg": 15125652
+  },
+  "iron_golem_spawn_egg": {
+    "bg": 14405058,
+    "fg": 7643954
+  },
+  "llama_spawn_egg": {
+    "bg": 12623485,
+    "fg": 10051392
+  },
+  "magma_cube_spawn_egg": {
+    "bg": 3407872,
+    "fg": 16579584
+  },
+  "mooshroom_spawn_egg": {
+    "bg": 10489616,
+    "fg": 12040119
+  },
+  "mule_spawn_egg": {
+    "bg": 1769984,
+    "fg": 5321501
+  },
+  "ocelot_spawn_egg": {
+    "bg": 15720061,
+    "fg": 5653556
+  },
+  "panda_spawn_egg": {
+    "bg": 15198183,
+    "fg": 1776418
+  },
+  "parrot_spawn_egg": {
+    "bg": 894731,
+    "fg": 16711680
+  },
+  "phantom_spawn_egg": {
+    "bg": 4411786,
+    "fg": 8978176
+  },
+  "pig_spawn_egg": {
+    "bg": 15771042,
+    "fg": 14377823
+  },
+  "piglin_spawn_egg": {
+    "bg": 10051392,
+    "fg": 16380836
+  },
+  "piglin_brute_spawn_egg": {
+    "bg": 5843472,
+    "fg": 16380836
+  },
+  "pillager_spawn_egg": {
+    "bg": 5451574,
+    "fg": 9804699
+  },
+  "polar_bear_spawn_egg": {
+    "bg": 15658718,
+    "fg": 14014157
+  },
+  "pufferfish_spawn_egg": {
+    "bg": 16167425,
+    "fg": 3654642
+  },
+  "rabbit_spawn_egg": {
+    "bg": 10051392,
+    "fg": 7555121
+  },
+  "ravager_spawn_egg": {
+    "bg": 7697520,
+    "fg": 5984329
+  },
+  "salmon_spawn_egg": {
+    "bg": 10489616,
+    "fg": 951412
+  },
+  "sheep_spawn_egg": {
+    "bg": 15198183,
+    "fg": 16758197
+  },
+  "shulker_spawn_egg": {
+    "bg": 9725844,
+    "fg": 5060690
+  },
+  "silverfish_spawn_egg": {
+    "bg": 7237230,
+    "fg": 3158064
+  },
+  "skeleton_spawn_egg": {
+    "bg": 12698049,
+    "fg": 4802889
+  },
+  "skeleton_horse_spawn_egg": {
+    "bg": 6842447,
+    "fg": 15066584
+  },
+  "slime_spawn_egg": {
+    "bg": 5349438,
+    "fg": 8306542
+  },
+  "sniffer_spawn_egg": {
+    "bg": 8855049,
+    "fg": 2468720
+  },
+  "snow_golem_spawn_egg": {
+    "bg": 14283506,
+    "fg": 8496292
+  },
+  "spider_spawn_egg": {
+    "bg": 3419431,
+    "fg": 11013646
+  },
+  "squid_spawn_egg": {
+    "bg": 2243405,
+    "fg": 7375001
+  },
+  "stray_spawn_egg": {
+    "bg": 6387319,
+    "fg": 14543594
+  },
+  "strider_spawn_egg": {
+    "bg": 10236982,
+    "fg": 5065037
+  },
+  "tadpole_spawn_egg": {
+    "bg": 7164733,
+    "fg": 1444352
+  },
+  "trader_llama_spawn_egg": {
+    "bg": 15377456,
+    "fg": 4547222
+  },
+  "tropical_fish_spawn_egg": {
+    "bg": 15690005,
+    "fg": 16775663
+  },
+  "turtle_spawn_egg": {
+    "bg": 15198183,
+    "fg": 44975
+  },
+  "vex_spawn_egg": {
+    "bg": 8032420,
+    "fg": 15265265
+  },
+  "villager_spawn_egg": {
+    "bg": 5651507,
+    "fg": 12422002
+  },
+  "vindicator_spawn_egg": {
+    "bg": 9804699,
+    "fg": 2580065
+  },
+  "wandering_trader_spawn_egg": {
+    "bg": 4547222,
+    "fg": 15377456
+  },
+  "warden_spawn_egg": {
+    "bg": 1001033,
+    "fg": 3790560
+  },
+  "witch_spawn_egg": {
+    "bg": 3407872,
+    "fg": 5349438
+  },
+  "wither_spawn_egg": {
+    "bg": 1315860,
+    "fg": 5075616
+  },
+  "wither_skeleton_spawn_egg": {
+    "bg": 1315860,
+    "fg": 4672845
+  },
+  "wolf_spawn_egg": {
+    "bg": 14144467,
+    "fg": 13545366
+  },
+  "zoglin_spawn_egg": {
+    "bg": 13004373,
+    "fg": 15132390
+  },
+  "zombie_spawn_egg": {
+    "bg": 44975,
+    "fg": 7969893
+  },
+  "zombie_horse_spawn_egg": {
+    "bg": 3232308,
+    "fg": 9945732
+  },
+  "zombie_villager_spawn_egg": {
+    "bg": 5651507,
+    "fg": 7969893
+  },
+  "zombified_piglin_spawn_egg": {
+    "bg": 15373203,
+    "fg": 5009705
+  }
+}

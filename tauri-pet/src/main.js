@@ -10,6 +10,7 @@ import { createDoll, grabNeck, releaseDoll, releaseNeck, stepDoll, syncDoll } fr
 import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
 import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
+import { frontCovers } from './mc/window-order.js'
 import { lightLevels } from './mc/daylight.js'
 import { parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
@@ -147,7 +148,8 @@ const stationView = createStationView({
 })
 const creativeView = createCreativeView({
   getHotbar: () => mcWorld?.hotbarState(),
-  onPick: (id) => {
+  onPick: (stack) => {
+    const id = stack?.id ?? stack
     if (!mcWorld || !id) {
       return
     }
@@ -189,6 +191,8 @@ const creativeView = createCreativeView({
   }),
 })
 let swapAnim = null
+let hotbarSeen = null
+let hotbarReveal = 0
 let windows = []
 let holding = false
 let pressing = false
@@ -366,9 +370,13 @@ function windowUnder(x, y, ignoreId) {
       continue
     }
     const onBar = (probe) => probe >= win.y - 36 && probe <= win.y + 120
-    if (onBar(y) || onBar(bodyY)) {
-      return win
+    if (!(onBar(y) || onBar(bodyY))) {
+      continue
     }
+    if (frontCovers(windows, x, win.y, win.id)) {
+      continue
+    }
+    return win
   }
   return null
 }
@@ -549,6 +557,14 @@ function followSeat() {
     windowGone = true
     return
   }
+  const seatX = Math.min(
+    Math.max(win.x + 36, win.x + win.width - 36),
+    Math.max(win.x + 36, win.x + pet.seatOffset),
+  )
+  if (frontCovers(windows, seatX, win.y, win.id)) {
+    windowGone = true
+    return
+  }
   windowGone = false
   noteWindowShake(win)
   if (phase === 'fling') {
@@ -681,6 +697,9 @@ function windowEdgeAhead() {
     if (gap < -36 || gap > bestGap) {
       continue
     }
+    if (frontCovers(windows, cling.edge, pet.y, win.id)) {
+      continue
+    }
     if (pet.y < win.y - 8) {
       continue
     }
@@ -705,6 +724,9 @@ function oppositeScreenCling(fromLeft) {
     const edge = arriveRight ? win.x + win.width : win.x
     const screenEdge = arriveRight ? screenW : 0
     if (Math.abs(edge - screenEdge) > 96) {
+      continue
+    }
+    if (frontCovers(windows, edge, pet.y, win.id)) {
       continue
     }
     const score = Math.abs(win.y + win.height / 2 - pet.y)
@@ -1416,11 +1438,25 @@ function updateFootsteps() {
 }
 
 function updateHotbar(delta) {
+  let switching = Boolean(swapAnim)
   if (mcWorld) {
-    hotbarView.sync(mcWorld.hotbarState())
+    const state = mcWorld.hotbarState()
+    const key = state.slots.join('|')
+    if (hotbarSeen && !controlling && (hotbarSeen.selected !== state.selected || hotbarSeen.key !== key)) {
+      hotbarReveal = 1.2
+    }
+    hotbarSeen = { selected: state.selected, key }
+    hotbarView.sync(state)
+    if (creativeView.isOpen()) {
+      creativeView.syncHotbar(state)
+    }
+  }
+  if (hotbarReveal > 0) {
+    hotbarReveal -= delta
+    switching = true
   }
   hotbarView.tick(delta)
-  const show = (phase === 'build' || controlling) && !hidden && rig.visible && !creativeView.isOpen() && !stationView.isOpen()
+  const show = !hidden && rig.visible && !stationView.isOpen() && (controlling || switching)
   hotbarView.setVisible(show)
   if (!show) {
     return
@@ -1716,6 +1752,7 @@ function hopOffWindow() {
   } else {
     const under = windows.find((win) => (
       pet.x >= win.x && pet.x <= win.x + win.width && Math.abs(pet.y - win.y) < 36
+      && !frontCovers(windows, pet.x, win.y, win.id)
     ))
     if (under) {
       ignoreSeatId = under.id
@@ -2279,36 +2316,45 @@ if (ANDROID) {
 
 resize()
 bindPointer()
-createMc({
-  parent: worldRoot,
-  bones,
-  getWindows: () => windows,
-  onPersist: (world) => {
-    saveWorldFile(world)
-  },
-}).then(async (api) => {
-  mcWorld = api
-  window.mc = api
-  window.mc.build = (json) => startBuild(json || starterSchematic)
-  const world = pendingWorld || await loadWorldFile()
-  pendingWorld = null
-  if (world?.blocks?.length || world?.hand || world?.offhand || world?.hotbar || world?.inv) {
-    await api.loadSave(world)
-  }
-  if (!holding && pet.mode !== 'sit') {
-    pet.y = window.innerHeight
-    if (mcWorld) {
-      const at = mcWorld.resolveSpawn(pet.x, pet.y)
-      pet.x = at.x
-      pet.y = at.y
-    } else {
-      pet.y = floorY()
+view.style.visibility = 'hidden'
+status.textContent = '正在加载物品栏…'
+Promise.all([
+  creativeView.ready(),
+  createMc({
+    parent: worldRoot,
+    bones,
+    getWindows: () => windows,
+    onPersist: (world) => {
+      saveWorldFile(world)
+    },
+  }).then(async (api) => {
+    mcWorld = api
+    window.mc = api
+    window.mc.build = (json) => startBuild(json || starterSchematic)
+    const world = pendingWorld || await loadWorldFile()
+    pendingWorld = null
+    if (world?.blocks?.length || world?.hand || world?.offhand || world?.hotbar || world?.inv) {
+      await api.loadSave(world)
     }
-    pet.onGround = true
-    pet.vy = 0
-  }
-
+    if (!holding && pet.mode !== 'sit') {
+      pet.y = window.innerHeight
+      if (mcWorld) {
+        const at = mcWorld.resolveSpawn(pet.x, pet.y)
+        pet.x = at.x
+        pet.y = at.y
+      } else {
+        pet.y = floorY()
+      }
+      pet.onGround = true
+      pet.vy = 0
+    }
+  }),
+]).then(() => {
+  view.style.visibility = ''
+  status.textContent = ''
+  requestAnimationFrame(frame)
 }).catch((error) => {
+  view.style.visibility = ''
   status.textContent = error instanceof Error ? error.message : String(error)
 })
 if (!ANDROID) {
@@ -2332,4 +2378,3 @@ window.__resetAndReload = () => {
     window.location.reload()
   })
 }
-requestAnimationFrame(frame)

@@ -120,7 +120,7 @@ const NO_COLLISION = new Set([
 const NO_COLLISION_SUFFIX = [
   '_sapling', '_fungus', '_roots', '_sprouts', '_orchid', '_tulip', '_bluet',
   '_daisy', '_poppy', '_dandelion', '_allium', '_lilac', '_rose_bush', '_peony',
-  '_sunflower', '_banner', '_wall_banner', '_button', '_pressure_plate',
+  '_sunflower', '_banner', '_wall_banner',
   '_coral_fan', '_coral_wall_fan',
 ]
 
@@ -136,7 +136,7 @@ const FLOWER = new Set([
 
 export function hasNoCollision(id) {
   const name = bareId(id)
-  if (NO_COLLISION.has(name) || FLOWER.has(name) || isTorch(name) || isButton(name) || isPressurePlate(name)) {
+  if (NO_COLLISION.has(name) || FLOWER.has(name) || isTorch(name)) {
     return true
   }
   return NO_COLLISION_SUFFIX.some((end) => name.endsWith(end))
@@ -147,7 +147,7 @@ export function isFullSolid(id, properties = {}) {
   if (!name || hasNoCollision(name) || isFluid(name)) {
     return false
   }
-  if (isFence(name) || isFenceGate(name) || isWall(name) || isPane(name) || isStairs(name) || isSlab(name) || isDoor(name) || isTrapdoor(name) || isBed(name) || isChest(name) || isCarpet(name) || isSign(name) || isHead(name) || isTorch(name)) {
+  if (isFence(name) || isFenceGate(name) || isWall(name) || isPane(name) || isStairs(name) || isSlab(name) || isDoor(name) || isTrapdoor(name) || isBed(name) || isChest(name) || isCarpet(name) || isSign(name) || isHead(name) || isTorch(name) || isButton(name) || isPressurePlate(name)) {
     return false
   }
   if (name === 'snow' && Number(properties.layers ?? 1) < 8) {

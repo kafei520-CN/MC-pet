@@ -6,6 +6,8 @@ import { createHotbar } from './hotbar.js'
 import { blockScreenRects, hitTest } from './hit.js'
 import { resolveScreenPosition, resolveSpawn, spawnBlocked, stepActor, supportScreenY } from './move.js'
 import { BLOCK_PX, layoutWorldRoot, screenToWorld } from './scale.js'
+import { createMobs } from './mobs.js'
+import { eggType, isSpawnEgg } from './spawn-egg.js'
 
 export { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './scale.js'
 
@@ -17,6 +19,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
   const holders = bones ? createHandHolders(bones) : { right: null, left: null }
   const hands = { right: null, left: null }
   const hotbar = createHotbar()
+  const mobs = createMobs(root)
   let playerSlots = Array.from({ length: 27 }, () => null)
   let handle = null
   let rebuildTimer = 0
@@ -76,6 +79,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       ...serialize(store, hands),
       hotbar: hotbar.save(),
       inv: playerSlots.map((stack) => (stack ? { ...stack } : null)),
+      mobs: mobs.save(),
     }
   }
 
@@ -182,6 +186,15 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
         if (Math.hypot(dx, dy) > 5) {
           return null
         }
+      }
+      if (isSpawnEgg(id)) {
+        const type = eggType(id)
+        if (!type) {
+          return null
+        }
+        mobs.spawn(type, x, y)
+        schedulePersist()
+        return Promise.resolve({ ok: true, spawned: type, x, y })
       }
       if (read(x, y)) {
         return null
@@ -308,11 +321,13 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       return spawnBlocked((x, y) => store.walkGet(x, y), feet.x, feet.y)
     },
     stepActor(actor, dt, extra) {
-      return stepActor(actor, dt, {
+      const result = stepActor(actor, dt, {
         getBlock: (x, y) => store.walkGet(x, y),
         windows: getWindows?.() ?? [],
         ...extra,
       })
+      mobs.step(dt, (x, y) => store.walkGet(x, y))
+      return result
     },
     isEmpty() {
       return store.cells.size === 0
@@ -329,6 +344,7 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
         }
         return { id: String(stack.id).replace(/^minecraft:/, ''), count: Math.min(64, Math.floor(stack.count)) }
       })
+      mobs.load(data?.mobs)
       await batch(async () => {
         applySave(store, data)
         if (data?.hand?.id) {
