@@ -4,6 +4,7 @@ description = "Read window rectangles and the tray target."
 commands.allow = [
   "desktop_map",
   "seat_rect",
+  "push_nexus_dock",
   "set_pointer_targets",
   "set_overlay_focus",
   "load_pet_settings",
