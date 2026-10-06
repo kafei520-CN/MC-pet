@@ -1,3 +1,5 @@
+import { listPack } from './pack-list.js'
+
 const TAGS = {
   'minecraft:planks': [
     'oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks',
@@ -59,11 +61,7 @@ let recipes = []
 let loading = null
 
 async function walk(dir) {
-  const response = await fetch(`/resource-pack/__list?dir=${encodeURIComponent(dir)}`)
-  if (!response.ok) {
-    return []
-  }
-  const names = await response.json()
+  const names = await listPack(dir)
   const found = []
   for (const name of names) {
     if (name.endsWith('.json')) {

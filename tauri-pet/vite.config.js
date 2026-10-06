@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { defineConfig } from 'vite'
+import { buildPackIndex } from './scripts/pack-index.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const packRoot = path.resolve(root, '../assets')
@@ -90,6 +91,10 @@ function resourcePack() {
       const dest = path.join(outDir, 'resource-pack')
       fs.mkdirSync(dest, { recursive: true })
       fs.cpSync(packRoot, dest, { recursive: true })
+      fs.writeFileSync(
+        path.join(dest, '__index.json'),
+        JSON.stringify(buildPackIndex(packRoot)),
+      )
       if (fs.existsSync(bmrZip)) {
         fs.copyFileSync(bmrZip, path.join(outDir, 'bmr-assets.zip'))
       }

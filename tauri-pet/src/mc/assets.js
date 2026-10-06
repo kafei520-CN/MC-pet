@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { configure, prepareAssets, readFile } from 'block-model-renderer'
 import { bareId } from './ids.js'
+import { listPack } from './pack-list.js'
 
 const PACK_META = JSON.stringify({
   pack: {
@@ -62,20 +63,9 @@ function makeHandler() {
         listCache.set(clean, names)
         return names
       }
-      try {
-        const response = await fetch(`/resource-pack/__list?dir=${encodeURIComponent(clean)}`)
-        if (!response.ok) {
-          listCache.set(clean, [])
-          return []
-        }
-        const names = await response.json()
-        const list = Array.isArray(names) ? names : []
-        listCache.set(clean, list)
-        return list
-      } catch {
-        listCache.set(clean, [])
-        return []
-      }
+      const list = await listPack(clean)
+      listCache.set(clean, list)
+      return list
     },
   }
 }

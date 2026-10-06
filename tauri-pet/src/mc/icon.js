@@ -11,6 +11,7 @@ import {
 } from './item-shape.js'
 import { composeBannerTexture } from './banner-composer.js'
 import { bedColorOf, renderBedIcon } from './bed-composer.js'
+import { listPack } from './pack-list.js'
 import { isSpawnEgg, paintSpawnEgg } from './spawn-egg.js'
 
 export const ICON_SIZE = 16
@@ -134,13 +135,7 @@ async function listedItemPngs() {
   if (itemPngs) {
     return itemPngs
   }
-  try {
-    const response = await fetch('/resource-pack/__list?dir=assets/minecraft/textures/item')
-    const list = await response.json()
-    itemPngs = new Set(Array.isArray(list) ? list : [])
-  } catch {
-    itemPngs = new Set()
-  }
+  itemPngs = new Set(await listPack('assets/minecraft/textures/item'))
   return itemPngs
 }
 

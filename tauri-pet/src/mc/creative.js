@@ -1,5 +1,6 @@
 import tabItems from './data/creative-tabs-1.20.1.json'
 import { itemStack } from './item-stack.js'
+import { listPack } from './pack-list.js'
 
 const TABS = [
   { id: 'building_blocks', name: '建筑方块', icon: 'bricks', row: 'top' },
@@ -15,27 +16,14 @@ const TABS = [
   { id: 'spawn_eggs', name: '刷怪蛋', icon: 'pig_spawn_egg', row: 'bottom' },
 ]
 
-async function listJson(dir) {
-  try {
-    const response = await fetch(`/resource-pack/__list?dir=${encodeURIComponent(dir)}`)
-    if (!response.ok) {
-      return []
-    }
-    const names = await response.json()
-    return Array.isArray(names) ? names : []
-  } catch {
-    return []
-  }
-}
-
 function fileId(name) {
   return name.endsWith('.json') ? name.slice(0, -'.json'.length) : ''
 }
 
 export async function loadCreativeTabs() {
   const [blocks, items] = await Promise.all([
-    listJson('minecraft/blockstates'),
-    listJson('minecraft/models/item'),
+    listPack('minecraft/blockstates'),
+    listPack('minecraft/models/item'),
   ])
   const have = new Set()
   for (const name of blocks) {
