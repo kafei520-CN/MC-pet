@@ -20,16 +20,49 @@ export const WATER_GRAVITY = 8
 export const WATER_RISE = 6
 export const CHUTE_FALL = 2.2
 
-function playerBox(wx, wy) {
-  const half = PLAYER_WIDTH / 2
+function actorBox(wx, wy, hw = PLAYER_WIDTH / 2, hh = PLAYER_HEIGHT) {
   return {
-    minX: wx - half,
-    maxX: wx + half,
+    minX: wx - hw,
+    maxX: wx + hw,
     minY: wy,
-    maxY: wy + PLAYER_HEIGHT,
+    maxY: wy + hh,
     minZ: 0.2,
     maxZ: 0.8,
   }
+}
+
+function playerBox(wx, wy) {
+  return actorBox(wx, wy)
+}
+
+export function screenRectBox(rect) {
+  const { height } = workSize()
+  return {
+    minX: rect.x / BLOCK_PX,
+    maxX: (rect.x + rect.width) / BLOCK_PX,
+    minY: (height - rect.y - rect.height) / BLOCK_PX,
+    maxY: (height - rect.y) / BLOCK_PX,
+    minZ: 0,
+    maxZ: 1,
+  }
+}
+
+export function desktopSolids(windows, taskbar) {
+  const { width, height } = workSize()
+  const boxes = []
+  if (taskbar && taskbar.width > 8 && taskbar.height > 8) {
+    boxes.push({ ...screenRectBox(taskbar), kind: 'taskbar' })
+  }
+  for (const win of windows ?? []) {
+    if (!win || atScreenTop(win)) {
+      continue
+    }
+    if (win.width > width * 0.88 && win.height > height * 0.88) {
+      continue
+    }
+    boxes.push({ ...screenRectBox(win), kind: 'window', windowId: win.id })
+  }
+  return boxes
 }
 
 function windowPlatforms(windows, ignoreId) {
@@ -217,7 +250,7 @@ function canStand(solids, wx, wy) {
   return solids.some((solid) => overlap(probe, solid) && Math.abs(solid.maxY - wy) < 0.12)
 }
 
-export function highestSupport(getBlock, windows, wx, fromY, ignoreId) {
+export function highestSupport(getBlock, windows, wx, fromY, ignoreId, extra = []) {
   const platforms = windowPlatforms(windows, ignoreId)
   const range = {
     minX: wx - PLAYER_WIDTH / 2,
@@ -230,7 +263,7 @@ export function highestSupport(getBlock, windows, wx, fromY, ignoreId) {
     maxX: range.maxX,
     minY: 0,
     maxY: fromY + 2,
-  }), ...platforms]
+  }), ...platforms, ...extra]
   let best = 0
   for (const solid of solids) {
     if (solid.maxX <= range.minX || solid.minX >= range.maxX) {
@@ -243,11 +276,35 @@ export function highestSupport(getBlock, windows, wx, fromY, ignoreId) {
   return best
 }
 
-export function supportScreenY(getBlock, windows, screenX, screenY, ignoreId) {
+export function supportScreenY(getBlock, windows, screenX, screenY, ignoreId, extra) {
   const feetY = screenY == null || screenY < 8 ? workSize().height : screenY
   const world = screenToWorld(screenX, feetY)
-  const y = highestSupport(getBlock, windows, world.x, world.y, ignoreId)
+  const y = highestSupport(getBlock, windows, world.x, world.y, ignoreId, extra)
   return worldToScreen(world.x, y).y
+}
+
+export function supportAt(getBlock, windows, extra, wx, fromY, hw = PLAYER_WIDTH / 2) {
+  const platforms = windowPlatforms(windows, null)
+  const solids = [...collectSolids(getBlock, {
+    minX: wx - hw - 1,
+    maxX: wx + hw + 1,
+    minY: 0,
+    maxY: fromY + 2,
+  }), ...platforms, ...extra]
+  let best = 0
+  for (const solid of solids) {
+    if (solid.maxX <= wx - hw || solid.minX >= wx + hw) {
+      continue
+    }
+    if (solid.maxY <= fromY + 0.08 && solid.maxY > best) {
+      best = solid.maxY
+    }
+  }
+  return best
+}
+
+export function blockSolids(getBlock, minX, minY, maxX, maxY) {
+  return collectSolids(getBlock, { minX, minY, maxX, maxY, minZ: 0, maxZ: 1 })
 }
 
 function findClimbWall(solids, feet, face) {
@@ -271,11 +328,34 @@ function findClimbWall(solids, feet, face) {
 
 export function stepActor(actor, dt, ctx) {
   const { getBlock, windows, wander, wantJump, ignoreWindowId } = ctx
+  const extra = ctx.extraSolids ?? desktopSolids(windows, ctx.taskbar)
+  const hw = ctx.hw ?? PLAYER_WIDTH / 2
+  const hh = ctx.hh ?? PLAYER_HEIGHT
   actor.climbHint = null
+  actor.blocked = false
   const feet = screenToWorld(actor.x, actor.y)
   let vx = actor.vx ?? 0
   let vy = actor.vy ?? 0
-  if (wander) {
+  let jumping = Boolean(wantJump)
+  if (wander?.path && wander.pi < wander.path.length) {
+    const node = wander.path[wander.pi]
+    const dx = node.x - feet.x
+    const dy = node.y - feet.y
+    if (Math.abs(dx) < 0.28 && Math.abs(dy) < 0.4) {
+      wander.pi += 1
+    } else {
+      vx = (dx === 0 ? (wander.face || 1) : Math.sign(dx)) * WALK_SPEED
+      wander.face = vx >= 0 ? 1 : -1
+      if (dy > STEP_HEIGHT + 0.05) {
+        jumping = true
+      }
+    }
+    if (wander.pi >= wander.path.length) {
+      vx = 0
+    }
+  } else if (wander?.path) {
+    vx = 0
+  } else if (wander && !wander.needPath) {
     const face = wander.face >= 0 ? 1 : -1
     vx = face * WALK_SPEED
   } else if (!ctx.keepMomentum) {
@@ -284,13 +364,13 @@ export function stepActor(actor, dt, ctx) {
       vx = 0
     }
   }
-  let aabb = playerBox(feet.x, feet.y)
+  let aabb = actorBox(feet.x, feet.y, hw, hh)
   const solids = [...collectSolids(getBlock, {
     minX: aabb.minX + vx * dt - 1,
     maxX: aabb.maxX + vx * dt + 1,
     minY: aabb.minY + Math.min(0, vy) * dt - 1,
     maxY: aabb.maxY + Math.max(0, vy) * dt + 2,
-  }), ...windowPlatforms(windows, ignoreWindowId)]
+  }), ...windowPlatforms(windows, ignoreWindowId), ...extra]
   for (const solid of solids) {
     if (solid.platform || !overlap(aabb, solid)) {
       continue
@@ -309,10 +389,10 @@ export function stepActor(actor, dt, ctx) {
   const inWater = fluids.some((box) => overlap(aabb, box))
   const groundedProbe = shiftBox(aabb, 0, -0.08)
   let onGround = aabb.minY <= 0.04 || solids.some((solid) => overlap(groundedProbe, solid) && aabb.minY >= solid.maxY - 0.12)
-  if (wantJump && onGround && !inWater) {
+  if (jumping && onGround && !inWater) {
     vy = JUMP_VY
     onGround = false
-  } else if (wantJump && inWater) {
+  } else if (jumping && inWater) {
     vy = Math.max(vy, WATER_RISE)
   }
   if (inWater) {
@@ -342,7 +422,7 @@ export function stepActor(actor, dt, ctx) {
     const rise = climbWall.maxY - feet.y
     if (rise > 0.05 && rise <= STEP_HEIGHT) {
       feet.y = climbWall.maxY
-      aabb = playerBox(feet.x, feet.y)
+      aabb = actorBox(feet.x, feet.y, hw, hh)
     } else if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
       vy = JUMP_VY
       onGround = false
@@ -362,17 +442,18 @@ export function stepActor(actor, dt, ctx) {
   }
   if (xMove.hit) {
     vx = 0
-    if (wander && onGround && !actor.climbHint) {
-      const nowFeet = { x: (aabb.minX + aabb.maxX) / 2, y: aabb.minY }
-      const wall = findClimbWall(solids, nowFeet, face)
-      if (wall) {
-        const rise = wall.maxY - nowFeet.y
-        if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
-          vy = JUMP_VY
-          onGround = false
-          vx = face * WALK_SPEED
-        }
+    const nowFeet = { x: (aabb.minX + aabb.maxX) / 2, y: aabb.minY }
+    const wall = findClimbWall(solids, nowFeet, face)
+    const rise = wall ? wall.maxY - nowFeet.y : Infinity
+    if (wander && onGround && !actor.climbHint && rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
+      vy = JUMP_VY
+      onGround = false
+      vx = face * WALK_SPEED
+    } else if (wander && rise > JUMP_HEIGHT + 0.05) {
+      if (wander.path) {
+        wander.pi = wander.path.length
       }
+      actor.blocked = true
     }
   }
   feet.x = (aabb.minX + aabb.maxX) / 2

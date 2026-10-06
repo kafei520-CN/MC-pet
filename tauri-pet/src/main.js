@@ -113,7 +113,9 @@ recacheStandLift()
 const pet = { x: 180, y: 0, mode: 'idle', seatId: null, seatOffset: 0, vx: 0, vy: 0, onGround: true, inWater: false, jumping: false }
 const swing = { x: 0, y: 0, z: 0 }
 const look = { yaw: 0, pitch: 0 }
+const gaze = { yaw: 0, pitch: 0, wait: 0.8 }
 const faceYaw = { current: 0 }
+const HEAD_FOLLOW = 0.62
 const pointer = { x: 180, y: 200 }
 const headPoint = new THREE.Vector3()
 const headTop = new THREE.Vector3()
@@ -193,6 +195,7 @@ let swapAnim = null
 let hotbarSeen = null
 let hotbarReveal = 0
 let windows = []
+let taskbar = null
 let holding = false
 let pressing = false
 let hovering = false
@@ -339,6 +342,7 @@ let seatBusy = false
 async function refreshWindows() {
   const map = await invoke('desktop_map')
   windows = map.windows ?? []
+  taskbar = map.taskbar ?? null
 }
 
 function pollSeat() {
@@ -609,8 +613,36 @@ function beginWander() {
   if (Math.abs(target - pet.x) < 140) {
     target = pet.x < window.innerWidth / 2 ? right : left
   }
-  wander = { targetX: target, face: target >= pet.x ? 1 : -1 }
+  if (!mcWorld?.findPath) {
+    wander = { targetX: target, face: target >= pet.x ? 1 : -1 }
+    calm = 0
+    return
+  }
+  const options = [target, target < pet.x ? right : left, pet.x + (Math.random() < 0.5 ? -1 : 1) * (160 + Math.random() * 280)]
+  for (const item of options) {
+    const plan = planWalk(item)
+    if (plan?.path) {
+      wander = plan
+      calm = 0
+      return
+    }
+  }
+  wander = null
   calm = 0
+}
+
+function planWalk(targetX) {
+  const face = targetX >= pet.x ? 1 : -1
+  if (!mcWorld?.findPath) {
+    return { targetX, face, path: null, pi: 0, needPath: true }
+  }
+  const start = screenToWorld(pet.x, pet.y)
+  const goal = screenToWorld(targetX, pet.y)
+  const path = mcWorld.findPath(start.x, start.y, goal.x, goal.y)
+  if (!path || path.length < 2) {
+    return null
+  }
+  return { targetX, face, path, pi: 1, needPath: true }
 }
 
 function stepWander(delta) {
@@ -632,8 +664,15 @@ function stepWander(delta) {
     pet.mode = 'idle'
     return
   }
+  if (wander.path && wander.pi >= wander.path.length) {
+    wander = null
+    calm = 0
+    idleWait = 20 + Math.random() * 25
+    player.scale.set(SCALE, SCALE, SCALE)
+    return
+  }
   const dx = wander.targetX - pet.x
-  if (Math.abs(dx) <= 3) {
+  if (!wander.path && Math.abs(dx) <= 3) {
     pet.x = wander.targetX
     wander = null
     calm = 0
@@ -1216,7 +1255,7 @@ function applyPose(delta) {
     bones.head.rotation.y = Math.sin(phaseTime * 3.2) * 0.55
     bones.spine.rotation.x = -0.08
   }
-  lookAtPointer(delta)
+  lookAround(delta)
   if (falling) {
     fallYaw += delta * 0.55
   } else {
@@ -1233,41 +1272,81 @@ function applyPose(delta) {
   }
 }
 
+function wrapAngle(value) {
+  let angle = value
+  while (angle > Math.PI) {
+    angle -= Math.PI * 2
+  }
+  while (angle < -Math.PI) {
+    angle += Math.PI * 2
+  }
+  return angle
+}
+
+function walkFace() {
+  if (climb?.face) {
+    return climb.face
+  }
+  if (wander && !holding) {
+    return wander.face
+  }
+  if (phase === 'build' && buildJob?.face) {
+    return buildJob.face
+  }
+  return 0
+}
+
 function faceWalk(delta) {
   const lean = climb?.kind === 'edge' ? (climb.face > 0 ? 0.42 : -0.42) : 0
   player.rotation.z += (lean - player.rotation.z) * Math.min(1, delta * 6)
-  const face = climb?.face
-    ? climb.face
-    : wander && !holding
-      ? wander.face
-      : (phase === 'build' && buildJob?.face)
-        ? buildJob.face
-        : 0
-  const target = face ? (face > 0 ? Math.PI / 2 : -Math.PI / 2) : 0
-  let diff = target - faceYaw.current
-  while (diff > Math.PI) {
-    diff -= Math.PI * 2
+  const face = walkFace()
+  if (face) {
+    const target = face > 0 ? Math.PI / 2 : -Math.PI / 2
+    const diff = wrapAngle(target - faceYaw.current)
+    faceYaw.current = wrapAngle(faceYaw.current + diff * Math.min(1, delta * 8))
   }
-  while (diff < -Math.PI) {
-    diff += Math.PI * 2
-  }
-  faceYaw.current += diff * Math.min(1, delta * 8)
   player.rotation.y = faceYaw.current
 }
 
-function lookAtPointer(delta) {
-  if (phase === 'look' || phase === 'leap' || phase === 'ragdoll' || phase === 'glance' || phase === 'build' || climb || falling || (wander && !holding)) {
+function lookBusy() {
+  return phase === 'look' || phase === 'leap' || phase === 'ragdoll' || phase === 'glance' || phase === 'build' || climb || falling
+}
+
+function lookAround(delta) {
+  if (lookBusy()) {
     return
   }
-  rig.updateWorldMatrix(true, true)
-  bones.head.getWorldPosition(headPoint)
-  const dx = pointer.x - headPoint.x
-  const dy = pointer.y - (-headPoint.y)
-  const yaw = Math.max(-0.75, Math.min(0.75, Math.atan2(dx, 260)))
-  const pitch = Math.max(-0.55, Math.min(0.6, Math.atan2(dy, 260)))
-  const blend = Math.min(1, delta * 10)
-  look.yaw += (yaw - look.yaw) * blend
-  look.pitch += (pitch - look.pitch) * blend
+  const walking = Boolean(walkFace())
+  const blend = Math.min(1, delta * (walking || holding ? 8 : 3.2))
+  if (walking || holding) {
+    look.yaw += (0 - look.yaw) * blend
+    look.pitch += (0 - look.pitch) * blend
+    gaze.wait = 0.5 + Math.random() * 0.6
+    bones.head.rotation.y = look.yaw
+    bones.head.rotation.x = look.pitch
+    return
+  }
+  gaze.wait -= delta
+  if (gaze.wait <= 0) {
+    const wide = Math.random() < 0.38
+    gaze.yaw = (Math.random() * 2 - 1) * (wide ? 1.5 : 0.72)
+    gaze.pitch = Math.random() * 0.7 - 0.28
+    gaze.wait = 0.85 + Math.random() * 2.4
+  }
+  look.yaw += (gaze.yaw - look.yaw) * blend
+  look.pitch += (gaze.pitch - look.pitch) * blend
+  if (look.yaw > HEAD_FOLLOW) {
+    faceYaw.current += look.yaw - HEAD_FOLLOW
+    look.yaw = HEAD_FOLLOW
+  } else if (look.yaw < -HEAD_FOLLOW) {
+    faceYaw.current += look.yaw + HEAD_FOLLOW
+    look.yaw = -HEAD_FOLLOW
+  }
+  if (Math.abs(gaze.yaw) < 0.3) {
+    faceYaw.current += (0 - faceYaw.current) * Math.min(1, delta * 1.5)
+  }
+  faceYaw.current = wrapAngle(faceYaw.current)
+  player.rotation.y = faceYaw.current
   bones.head.rotation.y = look.yaw
   bones.head.rotation.x = look.pitch
 }
@@ -1362,6 +1441,10 @@ function place(delta) {
       parachute: falling && !mcWorld.holdingRight(),
       wantJump: controlling && controlKeys.w && !creativeView.isOpen() && !stationView.isOpen(),
     })
+    if (pet.blocked && wander?.needPath) {
+      wander = null
+      calm = 0
+    }
     const airborne = !pet.onGround && !pet.inWater
     if (!wasGround && pet.onGround && !pet.inWater && !climb && phase !== 'build' && phase !== 'ragdoll') {
       settleLanding(incomingVy)
@@ -2313,6 +2396,12 @@ if (ANDROID) {
   }
 } else {
   listen('pet-menu', (event) => onPetMenu(event.payload))
+  listen('clear-world', () => {
+    saveMuted = true
+    invoke('clear_world').finally(() => {
+      window.location.reload()
+    })
+  })
 }
 
 resize()
@@ -2325,6 +2414,7 @@ Promise.all([
     parent: worldRoot,
     bones,
     getWindows: () => windows,
+    getTaskbar: () => taskbar,
     onPersist: (world) => {
       saveWorldFile(world)
     },

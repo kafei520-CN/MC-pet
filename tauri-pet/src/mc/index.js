@@ -4,14 +4,24 @@ import { rebuildWorld } from './render-world.js'
 import { createHandHolders, setHeldItem } from './items.js'
 import { createHotbar } from './hotbar.js'
 import { blockScreenRects, hitTest } from './hit.js'
-import { resolveScreenPosition, resolveSpawn, spawnBlocked, stepActor, supportScreenY } from './move.js'
-import { BLOCK_PX, layoutWorldRoot, screenToWorld } from './scale.js'
+import {
+  blockSolids,
+  desktopSolids,
+  resolveScreenPosition,
+  resolveSpawn,
+  spawnBlocked,
+  stepActor,
+  supportAt,
+  supportScreenY,
+} from './move.js'
+import { findPath } from './pathfind.js'
+import { BLOCK_PX, layoutWorldRoot, PLAYER_HEIGHT, PLAYER_WIDTH, screenToWorld } from './scale.js'
 import { createMobs } from './mobs.js'
 import { eggType, isSpawnEgg } from './spawn-egg.js'
 
 export { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './scale.js'
 
-export async function createMc({ parent, bones, onPersist, getWindows }) {
+export async function createMc({ parent, bones, onPersist, getWindows, getTaskbar }) {
   await getAssets()
   const store = createStore()
   const root = parent
@@ -308,7 +318,9 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       return collisionAt(store, x, y)
     },
     supportScreenY(screenX, screenY, ignoreWindowId) {
-      return supportScreenY((x, y) => store.walkGet(x, y), getWindows?.() ?? [], screenX, screenY, ignoreWindowId)
+      const windows = getWindows?.() ?? []
+      const extra = desktopSolids(windows, getTaskbar?.() ?? null)
+      return supportScreenY((x, y) => store.walkGet(x, y), windows, screenX, screenY, ignoreWindowId, extra)
     },
     blockSupportScreenY(screenX, screenY) {
       return supportScreenY((x, y) => store.walkGet(x, y), [], screenX, screenY)
@@ -324,13 +336,40 @@ export async function createMc({ parent, bones, onPersist, getWindows }) {
       return spawnBlocked((x, y) => store.walkGet(x, y), feet.x, feet.y)
     },
     stepActor(actor, dt, extra) {
+      const windows = getWindows?.() ?? []
+      const taskbar = getTaskbar?.() ?? null
+      const extraSolids = desktopSolids(windows, taskbar)
       const result = stepActor(actor, dt, {
         getBlock: (x, y) => store.walkGet(x, y),
-        windows: getWindows?.() ?? [],
+        windows,
+        taskbar,
+        extraSolids,
         ...extra,
       })
-      mobs.step(dt, (x, y) => store.walkGet(x, y))
+      mobs.step(dt, (x, y) => store.walkGet(x, y), extraSolids, {
+        supportAt: (wx, fromY, hw) => supportAt((x, y) => store.walkGet(x, y), windows, extraSolids, wx, fromY, hw),
+      })
       return result
+    },
+    findPath(startX, startY, goalX, goalY, size) {
+      const windows = getWindows?.() ?? []
+      const extraSolids = desktopSolids(windows, getTaskbar?.() ?? null)
+      const hw = size?.hw ?? PLAYER_WIDTH / 2
+      const hh = size?.hh ?? PLAYER_HEIGHT
+      const solids = [
+        ...blockSolids((x, y) => store.walkGet(x, y), startX - 40, 0, startX + 40, startY + 12),
+        ...extraSolids,
+      ]
+      return findPath({
+        startX,
+        startY,
+        goalX,
+        goalY,
+        hw,
+        hh,
+        solids,
+        supportAt: (wx, fromY) => supportAt((x, y) => store.walkGet(x, y), windows, extraSolids, wx, fromY, hw),
+      })
     },
     isEmpty() {
       return store.cells.size === 0

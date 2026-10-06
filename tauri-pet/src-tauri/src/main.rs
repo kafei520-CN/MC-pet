@@ -5,7 +5,7 @@ mod desktop;
 use desktop::capture_desktop;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, PhysicalPosition, PhysicalSize};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 
 #[derive(Clone, serde::Deserialize)]
 struct HitRect {
@@ -94,6 +94,21 @@ fn save_world(app: tauri::AppHandle, world: String) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     std::fs::write(path, world).map_err(|err| err.to_string())
+}
+
+fn clear_world_files(app: &tauri::AppHandle) {
+    if let Ok(path) = world_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Ok(path) = legacy_world_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[tauri::command]
+fn clear_world(app: tauri::AppHandle) -> Result<(), String> {
+    clear_world_files(&app);
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -255,12 +270,14 @@ fn main() {
             load_pet_settings,
             save_pet_settings,
             load_world,
-            save_world
+            save_world,
+            clear_world
         ])
         .setup(|app| {
             let open_menu = MenuItem::with_id(app, "open-menu", "打开菜单", true, None::<&str>)?;
+            let clear_save = MenuItem::with_id(app, "clear-world", "清空存档并重载", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_menu, &quit])?;
+            let menu = Menu::with_items(app, &[&open_menu, &clear_save, &quit])?;
             let mut tray = TrayIconBuilder::new()
                 .tooltip("MC桌宠")
                 .menu(&menu)
@@ -270,6 +287,12 @@ fn main() {
                             let _ = window.show();
                             let _ = window.unminimize();
                             let _ = window.set_focus();
+                        }
+                    }
+                    if event.id() == "clear-world" {
+                        clear_world_files(app);
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("clear-world", ());
                         }
                     }
                     if event.id() == "quit" {

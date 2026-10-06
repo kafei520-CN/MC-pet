@@ -62,7 +62,7 @@ export function visibleTopSpans(win, windows) {
 // Title bars on the screen's top edge are not seats. A few pixels covers the
 // invisible window border that maximized windows report above y=0.
 export const SCREEN_TOP_SEAT = 8
-const NEAR_TOP = 48
+const TITLE_BAR = 32
 
 export function atScreenTop(win) {
   return Boolean(win) && win.y <= SCREEN_TOP_SEAT
@@ -78,9 +78,9 @@ export function seatAt(windows, x, y, ignoreId) {
     }
     const spans = visibleTopSpans(win, list)
     const onSpan = spans.some(([left, right]) => x >= left && x <= right)
-    const nearTop = onSpan && y >= win.y - NEAR_TOP && y <= win.y + NEAR_TOP
+    const onTitle = onSpan && y >= win.y - 4 && y <= win.y + TITLE_BAR
     const inside = coversPoint(win, x, y)
-    if (!nearTop && !inside) {
+    if (!onTitle && !inside) {
       continue
     }
     if (atScreenTop(win)) {
@@ -89,7 +89,7 @@ export function seatAt(windows, x, y, ignoreId) {
     if (ignoreId != null && win.id === ignoreId) {
       return null
     }
-    if (!onSpan) {
+    if (!onTitle) {
       return null
     }
     return win

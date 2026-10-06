@@ -31,9 +31,10 @@ const underFlush = { id: 'under', x: 40, y: 80, width: 300, height: 240 }
 assert(seatAt([high], 80, 48)?.id === 'high', 'a window below the screen edge can be sat on')
 assert(seatAt([flush], 80, 40) == null, 'a window on the screen top is not a seat')
 assert(seatAt([flush, underFlush], 80, 120) == null, 'a screen-top window does not pass the seat through')
-assert(seatAt(windows, 250, 400)?.id === 'front', 'a point on the front window sits on the front window')
+assert(seatAt(windows, 250, 210)?.id === 'front', 'the title bar of the front window is a seat')
+assert(seatAt(windows, 250, 400) == null, 'the window body is not a seat')
 assert(seatAt(windows, 90, 260)?.id === 'back', 'an exposed top beside the front window is the back window')
-assert(seatAt(windows, 250, 260)?.id === 'front', 'a point on the front window does not sit on the window behind')
+assert(seatAt(windows, 250, 260) == null, 'a point on the front window body does not sit on the window behind')
 const strip = { id: 'strip', x: 100, y: 240, width: 200, height: 40 }
 assert(seatAt([strip, back], 250, 350) == null, 'a covered top does not fall through to the window behind')
 assert(seatAt(windows, 250, 400, 'front') == null, 'ignoring the front window does not sit through it')

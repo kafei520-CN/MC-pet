@@ -250,7 +250,8 @@ fn taskbar_rect(scale: f32) -> Option<ScreenRect> {
         let tray = FindWindowW(w!("Shell_TrayWnd"), None).ok()?;
         let mut raw = RECT::default();
         GetWindowRect(tray, &mut raw).ok()?;
-        Some(to_logical(raw, scale, 0, 0))
+        let (origin_x, origin_y) = work_origin(scale);
+        Some(to_logical(raw, scale, origin_x, origin_y))
     }
 }
 
@@ -261,7 +262,8 @@ fn tray_rect(scale: f32) -> Option<ScreenRect> {
             .unwrap_or(tray);
         let mut raw = RECT::default();
         GetWindowRect(notify, &mut raw).ok()?;
-        Some(to_logical(raw, scale, 0, 0))
+        let (origin_x, origin_y) = work_origin(scale);
+        Some(to_logical(raw, scale, origin_x, origin_y))
     }
 }
 
