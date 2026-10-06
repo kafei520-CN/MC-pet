@@ -18,6 +18,7 @@ import { findPath } from './pathfind.js'
 import { BLOCK_PX, layoutWorldRoot, PLAYER_HEIGHT, PLAYER_WIDTH, screenToWorld } from './scale.js'
 import { createMobs } from './mobs.js'
 import { eggType, isSpawnEgg } from './spawn-egg.js'
+import { createParticles } from './particles.js'
 
 export { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './scale.js'
 
@@ -30,6 +31,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
   const hands = { right: null, left: null }
   const hotbar = createHotbar()
   const mobs = createMobs(root)
+  const particles = createParticles(root)
   let playerSlots = Array.from({ length: 27 }, () => null)
   let handle = null
   let rebuildTimer = 0
@@ -126,6 +128,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     removeBlock(x, y, z = 0) {
       const result = removeBlock(store, x, y, z)
       if (result.ok) {
+        particles.burst(result.removed[0]?.id, result.removed)
         dirty()
       }
       return result
@@ -154,6 +157,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
       }
       const result = removeBlock(store, cell.x, cell.y, z)
       if (result.ok) {
+        particles.burst(result.removed[0]?.id, result.removed)
         dirty()
       }
       return result
@@ -238,6 +242,17 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
         return { ok: false }
       }
       const result = setBlockState(store, x, y, {}, { ...(block.nbt ?? {}), ...nbt }, z)
+      if (result.ok) {
+        dirty()
+      }
+      return result
+    },
+    setContainerOpen(x, y, z, open) {
+      const block = store.get(x, y, z)
+      if (!block) {
+        return { ok: false }
+      }
+      const result = setBlockState(store, x, y, {}, { ...(block.nbt ?? {}), open: Boolean(open) }, z)
       if (result.ok) {
         dirty()
       }
@@ -407,8 +422,9 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     layout() {
       layoutWorldRoot(root)
     },
-    tick(camera) {
+    tick(camera, delta) {
       handle?.sortTranslucent?.(camera)
+      particles.tick(delta)
     },
     async demo() {
       await batch(async () => {

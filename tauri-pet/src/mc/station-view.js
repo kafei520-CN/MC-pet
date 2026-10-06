@@ -14,7 +14,7 @@ function renderIcon(id) {
   return renderGuiIcon(id, 16 * SCALE)
 }
 
-export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
+export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {}) {
   const root = document.createElement('div')
   root.id = 'station'
   root.hidden = true
@@ -430,6 +430,8 @@ export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
       resize()
       open = true
       root.hidden = false
+      root.classList.remove('station-open')
+      requestAnimationFrame(() => root.classList.add('station-open'))
       paint()
     },
     close() {
@@ -442,9 +444,11 @@ export function createStationView({ onSave, onHotbar, getHotbar } = {}) {
       }
       if (open) {
         persist()
+        onClose?.({ where, parts, kind })
       }
       open = false
       root.hidden = true
+      root.classList.remove('station-open')
       cursor.hidden = true
     },
     tick(delta) {

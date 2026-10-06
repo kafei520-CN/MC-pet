@@ -83,7 +83,7 @@ function darken(group, amount) {
 }
 
 function applySpecialPoses(group, blocks) {
-  const open = blocks.some((block) => isChest(block.id) && (block.nbt?.open || String(block.properties?.open) === 'true'))
+  const open = blocks.some((block) => (isChest(block.id) || block.id === 'barrel') && (block.nbt?.open || String(block.properties?.open) === 'true'))
   if (!open) {
     return
   }

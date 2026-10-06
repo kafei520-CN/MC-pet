@@ -15,7 +15,7 @@ import { resolveEdgeX, rimClimbFace, stepScreenRim } from './mc/screen-edge.js'
 import { lightLevels } from './mc/daylight.js'
 import { parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
-import { playPlace, playStep } from './mc/sounds.js'
+import { playBreak, playPlace, playStep } from './mc/sounds.js'
 import { swapDuration } from './mc/hotbar.js'
 import { createHotbarView } from './mc/hotbar-view.js'
 import { createCreativeView } from './mc/creative-view.js'
@@ -123,6 +123,18 @@ const headTop = new THREE.Vector3()
 const hotbarView = createHotbarView()
 const stationView = createStationView({
   getHotbar: () => mcWorld?.hotbarState(),
+  onClose: ({ where, parts }) => {
+    if (!mcWorld) {
+      return
+    }
+    if (parts) {
+      for (const part of parts) {
+        mcWorld.setContainerOpen(part.x, part.y, part.z, false)
+      }
+    } else if (where) {
+      mcWorld.setContainerOpen(where.x, where.y, where.z, false)
+    }
+  },
   onSave: ({ where, nbt, player, parts }) => {
     if (!mcWorld) {
       return
@@ -2094,6 +2106,8 @@ function openStation(hit, z) {
       const bx = ax + 1
       const a = mcWorld.getBlock(ax, hit.y, z)
       const b = mcWorld.getBlock(bx, hit.y, z)
+      mcWorld.setContainerOpen(ax, hit.y, z, true)
+      mcWorld.setContainerOpen(bx, hit.y, z, true)
       stationView.open({
         kind: 'double_chest',
         parts: [
@@ -2105,6 +2119,9 @@ function openStation(hit, z) {
       })
       return true
     }
+  }
+  if (kind === 'chest' || kind === 'barrel') {
+    mcWorld.setContainerOpen(hit.x, hit.y, z, true)
   }
   stationView.open({
     kind,
@@ -2124,7 +2141,7 @@ function actBlock(hold, layer) {
   if (hold.button === 0) {
     const broken = mcWorld.breakAt(hold.x, hold.y, layer)
     if (broken?.ok) {
-      playStep()
+      playBreak(broken.removed?.[0]?.id)
     }
     return
   }
@@ -2345,7 +2362,7 @@ function frame(now) {
     followSeat()
     place(delta)
     publishPointer()
-    mcWorld?.tick(camera)
+    mcWorld?.tick(camera, delta)
     renderer.render(scene, camera)
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error)
