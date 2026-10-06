@@ -155,6 +155,20 @@ export function depenetrate(aabb, solids, maxIter = 8) {
     if (!hit) {
       return current
     }
+    const lift = hit.maxY - current.minY
+    if (lift > 0 && lift <= STEP_HEIGHT + 0.02) {
+      const raised = shiftBox(current, 0, lift + SEPARATE_EPS)
+      const blocked = solids.some((solid) => (
+        solid !== hit
+        && !solid.platform
+        && overlap(raised, solid)
+        && solid.minY > hit.maxY + 0.02
+      ))
+      if (!blocked) {
+        current = raised
+        continue
+      }
+    }
     if (bestOx < bestOy) {
       const cx = (current.minX + current.maxX) / 2
       const sx = (hit.minX + hit.maxX) / 2
@@ -163,13 +177,8 @@ export function depenetrate(aabb, solids, maxIter = 8) {
     } else {
       const cy = (current.minY + current.maxY) / 2
       const sy = (hit.minY + hit.maxY) / 2
-      const lift = hit.maxY - current.minY
-      if (lift > 0 && lift <= STEP_HEIGHT + 0.02 && cy >= sy) {
-        current = shiftBox(current, 0, lift + SEPARATE_EPS)
-      } else {
-        const push = bestOy + SEPARATE_EPS
-        current = shiftBox(current, 0, cy < sy ? -push : push)
-      }
+      const push = bestOy + SEPARATE_EPS
+      current = shiftBox(current, 0, cy < sy ? -push : push)
     }
   }
   return current
@@ -309,21 +318,42 @@ export function blockSolids(getBlock, minX, minY, maxX, maxY) {
 
 function findClimbWall(solids, feet, face) {
   let best = null
-  let bestRise = 0
-  for (const dist of [0.02, 0.08]) {
+  let bestRise = Infinity
+  for (const dist of [0.02, 0.08, 0.2]) {
     const probe = playerBox(feet.x + face * dist, feet.y + 0.02)
     for (const solid of solids) {
       if (solid.platform || !overlap(probe, solid)) {
         continue
       }
       const rise = solid.maxY - feet.y
-      if (rise > 0.2 && rise >= bestRise) {
+      if (rise > 0.04 && rise <= JUMP_HEIGHT + 0.05 && rise < bestRise) {
         best = solid
         bestRise = rise
       }
     }
   }
   return best
+}
+
+function stepOnto(aabb, solids, feet, face, hw, hh) {
+  const wall = findClimbWall(solids, feet, face)
+  if (!wall) {
+    return null
+  }
+  const rise = wall.maxY - feet.y
+  if (rise <= 0.04 || rise > STEP_HEIGHT + 0.02) {
+    return null
+  }
+  const lifted = actorBox(feet.x, wall.maxY, hw, hh)
+  const blocked = solids.some((solid) => (
+    !solid.platform
+    && overlap(lifted, solid)
+    && solid.minY > wall.maxY + 0.02
+  ))
+  if (blocked) {
+    return null
+  }
+  return { aabb: lifted, y: wall.maxY }
 }
 
 export function stepActor(actor, dt, ctx) {
@@ -420,17 +450,33 @@ export function stepActor(actor, dt, ctx) {
   const climbWall = findClimbWall(solids, feet, face)
   if (wander && onGround && climbWall) {
     const rise = climbWall.maxY - feet.y
-    if (rise > 0.05 && rise <= STEP_HEIGHT) {
-      feet.y = climbWall.maxY
-      aabb = actorBox(feet.x, feet.y, hw, hh)
+    if (rise > 0.04 && rise <= STEP_HEIGHT + 0.02) {
+      const stepped = stepOnto(aabb, solids, feet, face, hw, hh)
+      if (stepped) {
+        feet.y = stepped.y
+        aabb = stepped.aabb
+        vy = Math.max(vy, 0)
+      }
     } else if (rise > STEP_HEIGHT && rise <= JUMP_HEIGHT + 0.05) {
       vy = JUMP_VY
       onGround = false
     }
   }
 
-  const xMove = resolveAxis(aabb, solids, 'x', vx * dt)
+  const xDelta = vx * dt
+  let xMove = resolveAxis(aabb, solids, 'x', xDelta)
   aabb = shiftBox(aabb, xMove.delta, 0)
+  if (xMove.hit && onGround) {
+    const nowFeet = { x: (aabb.minX + aabb.maxX) / 2, y: aabb.minY }
+    const stepped = stepOnto(aabb, solids, nowFeet, face, hw, hh)
+    if (stepped) {
+      const rest = xDelta - xMove.delta
+      const retry = resolveAxis(stepped.aabb, solids, 'x', rest)
+      aabb = shiftBox(stepped.aabb, retry.delta, 0)
+      vy = Math.max(vy, 0)
+      xMove = retry
+    }
+  }
   const yMove = resolveAxis(aabb, solids, 'y', vy * dt)
   aabb = shiftBox(aabb, 0, yMove.delta)
   if (yMove.hit && vy < 0) {

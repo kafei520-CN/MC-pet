@@ -11,6 +11,7 @@ import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
 import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
 import { atScreenTop, frontCovers, seatAt, seatXOn } from './mc/window-order.js'
+import { resolveEdgeX, rimClimbFace, stepScreenRim } from './mc/screen-edge.js'
 import { lightLevels } from './mc/daylight.js'
 import { parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
@@ -227,6 +228,7 @@ let buildPlaced = 0
 let stepMark = null
 let stepDistance = 0
 let climb = null
+let edgeLeave = 0
 let seatMotion = null
 let shakeCount = 0
 let shakeAt = 0
@@ -731,6 +733,9 @@ function windowEdgeAhead() {
       continue
     }
     const cling = edgeCling(win, face)
+    if (cling.outside) {
+      continue
+    }
     const gap = cling.face > 0 ? cling.edge - pet.x : pet.x - cling.edge
     if (gap < -36 || gap > bestGap) {
       continue
@@ -750,17 +755,17 @@ function windowEdgeAhead() {
   return best
 }
 
-function oppositeScreenCling(fromLeft) {
+function screenBezelWindow(side) {
   const screenW = window.innerWidth
-  const arriveRight = fromLeft
+  const onLeft = side === 'left'
   let best = null
   let bestScore = Infinity
   for (const win of windows) {
     if (!win || win.height < 40 || win.width < 80) {
       continue
     }
-    const edge = arriveRight ? win.x + win.width : win.x
-    const screenEdge = arriveRight ? screenW : 0
+    const edge = onLeft ? win.x : win.x + win.width
+    const screenEdge = onLeft ? 0 : screenW
     if (Math.abs(edge - screenEdge) > 96) {
       continue
     }
@@ -773,33 +778,43 @@ function oppositeScreenCling(fromLeft) {
       best = win
     }
   }
-  const face = arriveRight ? 1 : -1
-  const edge = arriveRight ? screenW : 0
-  const x = arriveRight ? screenW - 16 : 16
-  return {
-    face,
-    edge,
-    x,
-    outside: false,
-    top: best ? best.y : Math.max(8, pet.y - 80),
-    bottom: best ? best.y + best.height : window.innerHeight - 4,
-  }
+  return best
 }
 
 function carryClimbAcross(x) {
+  return resolveEdgeX(x, window.innerWidth)
+}
+
+function beginRimClimb(side) {
   const screenW = window.innerWidth
-  if (x >= -2 && x <= screenW + 2) {
-    return x
+  const onLeft = side === 'left'
+  const win = screenBezelWindow(side)
+  const face = rimClimbFace(side)
+  const edge = onLeft ? 0 : screenW
+  beginEdgeClimb({
+    face,
+    edge,
+    x: onLeft ? 16 : Math.max(16, screenW - 16),
+    outside: false,
+    top: win ? win.y : Math.max(8, pet.y - 80),
+    win,
+    mountX: onLeft ? 36 : Math.max(36, screenW - 36),
+  })
+}
+
+function tryBezelClimb() {
+  if (!controlling || climb || holding || falling || edgeLeave > 0) {
+    return
   }
-  const wrapped = oppositeScreenCling(x < 0)
-  climb.face = wrapped.face
-  climb.edge = wrapped.edge
-  climb.outside = wrapped.outside
-  climb.top = wrapped.top
-  climb.bottom = wrapped.bottom
-  climb.mountX = wrapped.face > 0 ? wrapped.edge + 36 : wrapped.edge - 36
-  poseTime = 0
-  return wrapped.x
+  const next = stepScreenRim({
+    x: pet.x,
+    screenW: window.innerWidth,
+    keys: controlKeys,
+  })
+  pet.x = next.x
+  if (next.climb) {
+    beginRimClimb(next.climb)
+  }
 }
 
 function beginEdgeClimb(hit) {
@@ -812,7 +827,7 @@ function beginEdgeClimb(hit) {
     outside: hit.outside,
     top: hit.top,
     bottom: hit.win ? hit.win.y + hit.win.height : window.innerHeight - 4,
-    mountX: hit.face > 0 ? hit.edge + 36 : hit.edge - 36,
+    mountX: hit.mountX ?? (hit.face > 0 ? hit.edge + 36 : hit.edge - 36),
   }
   poseTime = 0
   poseName = controlKeys.w ? 'PET_EDGE_CLIMB' : 'PET_EDGE_HANG'
@@ -862,7 +877,12 @@ function stepClimb(delta) {
     if (away) {
       climb = null
       pet.onGround = false
+      edgeLeave = 0.45
       return
+    }
+    const ground = floorY()
+    if (pet.y < ground - 12) {
+      climb.aboveGround = true
     }
     if (controlKeys.w) {
       if (climb.stage !== 'up') {
@@ -886,8 +906,18 @@ function stepClimb(delta) {
         poseTime = 0
         poseName = 'PET_EDGE_CLIMB'
       }
-      const floor = Math.min(window.innerHeight - 8, climb.bottom || window.innerHeight - 8)
-      pet.y = Math.min(floor, pet.y + 92 * delta)
+      pet.y = Math.min(ground, pet.y + 92 * delta)
+    }
+    if (climb.aboveGround && pet.y >= ground - 4) {
+      pet.y = ground
+      pet.onGround = true
+      pet.vy = 0
+      pet.mode = 'idle'
+      climb = null
+      edgeLeave = 0.45
+      return
+    }
+    if (controlKeys.s) {
       return
     }
     if (climb.stage !== 'hang') {
@@ -1363,7 +1393,13 @@ function place(delta) {
   const moving = controlling
     ? Boolean(wander)
     : ((frameChoice === 'walk' || frameChoice === 'wander' || (frameChoice === 'build' && buildJob?.stage === 'walk')))
-  if (controlling && !climb && !holding && !falling && (moving || controlKeys.w)) {
+  if (edgeLeave > 0) {
+    edgeLeave = Math.max(0, edgeLeave - delta)
+  }
+  tryBezelClimb()
+  const screenW = window.innerWidth
+  const atBezel = pet.x <= 40 || pet.x >= screenW - 40
+  if (controlling && !climb && !holding && !falling && edgeLeave <= 0 && !atBezel && (moving || controlKeys.w)) {
     const edge = windowEdgeAhead()
     if (edge) {
       beginEdgeClimb(edge)
@@ -1478,6 +1514,10 @@ function place(delta) {
     if (Math.abs(floorY() - pet.y) < 2) {
       catchSeat()
     }
+  }
+  tryBezelClimb()
+  if (phase !== 'ragdoll' && !ANDROID) {
+    pet.x = resolveEdgeX(pet.x, window.innerWidth)
   }
   swing.x += (0 - swing.x) * Math.min(1, delta * 4)
   swing.z += (0 - swing.z) * Math.min(1, delta * 4)
