@@ -169,6 +169,14 @@ export function depenetrate(aabb, solids, maxIter = 8) {
         continue
       }
     }
+    if (hit.kind === 'window') {
+      const onto = hit.maxY - current.minY
+      const through = current.maxY - hit.minY
+      if (onto > 0 && onto <= through) {
+        current = shiftBox(current, 0, onto + SEPARATE_EPS)
+        continue
+      }
+    }
     if (bestOx < bestOy) {
       const cx = (current.minX + current.maxX) / 2
       const sx = (hit.minX + hit.maxX) / 2

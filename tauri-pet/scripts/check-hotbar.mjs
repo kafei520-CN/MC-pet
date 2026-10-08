@@ -9,25 +9,26 @@ function assert(cond, message) {
 }
 
 const bar = createHotbar()
-assert(bar.state().slots.join() === STARTER_ITEMS.join(), 'starter slots')
+assert(bar.state().slots.map((slot) => slot?.id).join() === STARTER_ITEMS.join(), 'starter slots')
 assert(bar.state().selected === 0, 'starter selected')
+assert(bar.state().slots[0].count === 1, 'starter stacks start at 1')
 
 let change = bar.commit('dirt')
-assert(change.direction === 1 && change.distance === 1 && change.selected === 1, 'switch to dirt')
+assert(change.direction === 1 && change.distance === 4 && change.selected === 4, 'switch to dirt')
 change = bar.commit('dirt')
-assert(change.direction === 0 && change.selected === 1, 'stay on dirt')
+assert(change.direction === 0 && change.selected === 4, 'stay on dirt')
 change = bar.commit('poppy')
-assert(change.replaced === true && bar.state().slots[1] === 'poppy', 'replace current slot')
+assert(change.replaced === true && bar.state().slots[4].id === 'poppy', 'replace current slot')
 change = bar.commit('grass_block')
-assert(change.direction === -1 && change.selected === 0, 'switch back left')
+assert(change.direction === -1 && change.selected === 3, 'switch back left')
 
 const saved = createHotbar()
 saved.read({ selected: 4, slots: ['stone', 'dirt', 'oak_log', 'glass', 'torch', null, null, null, null] })
-assert(saved.state().selected === 4 && saved.state().slots[4] === 'torch', 'load save')
+assert(saved.state().selected === 4 && saved.state().slots[4].id === 'torch', 'load save')
 saved.read(null, 'oak_planks')
-assert(saved.state().selected === 3 && saved.state().slots[3] === 'oak_planks', 'seed selects held item')
+assert(saved.state().selected === 5 && saved.state().slots[5].id === 'oak_planks', 'seed selects held item')
 saved.read({ selected: 9, slots: ['a'] }, 'dirt')
-assert(saved.state().slots[1] === 'dirt' && saved.state().selected === 1, 'bad save reseeds')
+assert(saved.state().slots[4].id === 'dirt' && saved.state().selected === 4, 'bad save reseeds')
 
 function worldArm(yaw, direction, u) {
   const rot = swapArmRotation(yaw, direction, u)

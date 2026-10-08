@@ -1,4 +1,5 @@
 import { bareId } from './ids.js'
+import { itemStack } from './item-stack.js'
 
 export function stationKind(id) {
   const name = bareId(id)
@@ -205,7 +206,7 @@ export function normalizeStack(stack) {
   if (!stack || !stack.id || stack.count < 1) {
     return null
   }
-  return { id: bareId(stack.id), count: Math.min(64, Math.floor(stack.count)) }
+  return itemStack(stack.id, stack.count)
 }
 
 export function readItems(nbt, count) {

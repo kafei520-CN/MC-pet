@@ -19,6 +19,10 @@ import { BLOCK_PX, layoutWorldRoot, PLAYER_HEIGHT, PLAYER_WIDTH, screenToWorld }
 import { createMobs } from './mobs.js'
 import { eggType, isSpawnEgg } from './spawn-egg.js'
 import { createParticles } from './particles.js'
+import { createSurvival, isFood, isWeapon, weaponDamage } from './survival.js'
+import { asStack } from './item-stack.js'
+import { createMineOverlay } from './mine-overlay.js'
+import { mineRate, mineStage, pickMineLayer } from './hardness.js'
 
 export { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './scale.js'
 
@@ -32,6 +36,8 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
   const hotbar = createHotbar()
   const mobs = createMobs(root)
   const particles = createParticles(root)
+  const mineOverlay = createMineOverlay()
+  let mine = null
   let playerSlots = Array.from({ length: 27 }, () => null)
   let handle = null
   let rebuildTimer = 0
@@ -39,6 +45,10 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
   let pointerEvents = false
   let generation = 0
   let mute = false
+  let gameMode = 'survival'
+  let gameDifficulty = 'normal'
+
+  const survival = createSurvival(() => schedulePersist())
 
   function scheduleRebuild() {
     window.clearTimeout(rebuildTimer)
@@ -76,6 +86,60 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     schedulePersist()
   }
 
+  function mineTarget(screenX, screenY, layer = 'front') {
+    const z = layer === 'back' ? BACK_Z : FRONT_Z
+    const hit = hitTest((x, y) => store.get(x, y, z), screenX, screenY)
+    if (!hit) {
+      return null
+    }
+    const block = store.get(hit.x, hit.y, z)
+    if (!block) {
+      return null
+    }
+    return { x: hit.x, y: hit.y, z, id: block.id }
+  }
+
+  function survivalMineTarget(screenX, screenY) {
+    const world = screenToWorld(screenX, screenY)
+    const under = pickMineLayer(
+      (x, y, z) => store.get(x, y, z),
+      Math.floor(world.x),
+      Math.floor(world.y),
+      FRONT_Z,
+      BACK_Z,
+    )
+    if (under) {
+      return under
+    }
+    const front = mineTarget(screenX, screenY, 'front')
+    if (front) {
+      return front
+    }
+    const back = mineTarget(screenX, screenY, 'back')
+    if (!back) {
+      return null
+    }
+    const above = store.get(back.x, back.y, FRONT_Z)
+    if (above) {
+      return { x: back.x, y: back.y, z: FRONT_Z, id: above.id }
+    }
+    return back
+  }
+
+  function finishBreak(cell) {
+    const result = removeBlock(store, cell.x, cell.y, cell.z)
+    if (result.ok) {
+      particles.burst(result.removed[0]?.id, result.removed)
+      dirty()
+    }
+    return result
+  }
+
+  function stopMining() {
+    mine = null
+    mineOverlay.clear()
+  }
+
   async function batch(work) {
     mute = true
     try {
@@ -92,6 +156,9 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
       hotbar: hotbar.save(),
       inv: playerSlots.map((stack) => (stack ? { ...stack } : null)),
       mobs: mobs.save(),
+      survival: survival.save(),
+      created: true,
+      game: { mode: gameMode, difficulty: gameDifficulty },
     }
   }
 
@@ -142,30 +209,136 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     selectedBlock() {
       return hotbar.selectedItem()
     },
-    breakAt(screenX, screenY, layer = 'front') {
-      const z = layer === 'back' ? BACK_Z : FRONT_Z
-      const read = (x, y) => (z === FRONT_Z ? store.walkGet(x, y) : store.get(x, y, BACK_Z))
-      const hit = hitTest(read, screenX, screenY)
+    survivalState() {
+      return survival.state()
+    },
+    gameState() {
+      return { mode: gameMode, difficulty: gameDifficulty }
+    },
+    setGameMode(next) {
+      gameMode = next === 'creative' ? 'creative' : 'survival'
+      survival.configure({ mode: gameMode, difficulty: gameDifficulty })
+      schedulePersist()
+      return { mode: gameMode, difficulty: gameDifficulty }
+    },
+    cycleGameMode() {
+      return this.setGameMode(gameMode === 'survival' ? 'creative' : 'survival')
+    },
+    setDifficulty(next) {
+      gameDifficulty = ['peaceful', 'easy', 'normal', 'hard'].includes(next) ? next : 'normal'
+      survival.configure({ mode: gameMode, difficulty: gameDifficulty })
+      schedulePersist()
+      return { mode: gameMode, difficulty: gameDifficulty }
+    },
+    cycleDifficulty() {
+      const values = ['peaceful', 'easy', 'normal', 'hard']
+      const index = values.indexOf(gameDifficulty)
+      return this.setDifficulty(values[(index + 1) % values.length])
+    },
+    async createWorld(options = {}) {
+      gameMode = options.mode === 'survival' ? 'survival' : 'creative'
+      gameDifficulty = ['peaceful', 'easy', 'normal', 'hard'].includes(options.difficulty)
+        ? options.difficulty
+        : 'peaceful'
+      store.clear()
+      mobs.load([])
+      hotbar.read(null)
+      survival.configure({ mode: gameMode, difficulty: gameDifficulty })
+      survival.reset()
+      await this.demo()
+      schedulePersist()
+      return this.gameState()
+    },
+    damagePlayer(amount) {
+      return survival.damage(amount)
+    },
+    healPlayer(amount) {
+      return survival.heal(amount)
+    },
+    eatSelected() {
+      const id = hotbar.selectedItem()
+      if (!id || !isFood(id)) {
+        return { ok: false, error: 'selected item is not food' }
+      }
+      const result = survival.eat(id)
+      if (!result.ok) {
+        return result
+      }
+      hotbar.consumeSelected()
+      schedulePersist()
+      void hold('right', hotbar.selectedItem())
+      return result
+    },
+    attackAt(screenX, screenY) {
+      const id = hotbar.selectedItem()
+      const damage = weaponDamage(id)
+      if (!damage) {
+        return { ok: false, error: 'selected item is not a weapon' }
+      }
       const world = screenToWorld(screenX, screenY)
-      const front = hitTest((x, y) => store.walkGet(x, y), screenX, screenY)
-      const cell = hit || (layer === 'back' && front) || {
-        x: Math.floor(world.x),
-        y: Math.floor(world.y),
-      }
-      if (!read(cell.x, cell.y)) {
-        return null
-      }
-      const result = removeBlock(store, cell.x, cell.y, z)
+      const result = mobs.attackAt(world.x, world.y, damage)
       if (result.ok) {
-        particles.burst(result.removed[0]?.id, result.removed)
-        dirty()
+        schedulePersist()
       }
       return result
+    },
+    breakAt(screenX, screenY, layer = 'front') {
+      const cell = mineTarget(screenX, screenY, layer)
+      if (!cell) {
+        return null
+      }
+      return finishBreak(cell)
+    },
+    tickMine(screenX, screenY, dt) {
+      if (gameMode === 'creative') {
+        mineOverlay.clear()
+        mine = null
+        return { instant: true }
+      }
+      const cell = survivalMineTarget(screenX, screenY)
+      if (!cell) {
+        stopMining()
+        return null
+      }
+      const tool = hotbar.selectedItem()
+      const rate = mineRate(cell.id, tool)
+      if (rate <= 0) {
+        stopMining()
+        return { unbreakable: true, id: cell.id }
+      }
+      if (!Number.isFinite(rate) || rate === Infinity) {
+        const result = finishBreak(cell)
+        stopMining()
+        return { broken: result, id: cell.id }
+      }
+      if (!mine || mine.x !== cell.x || mine.y !== cell.y || mine.z !== cell.z || mine.id !== cell.id) {
+        mine = { x: cell.x, y: cell.y, z: cell.z, id: cell.id, progress: 0, sound: 0.28 }
+      }
+      mine.progress += rate * Math.max(0, dt)
+      mine.sound += Math.max(0, dt)
+      const stage = Math.max(0, mineStage(Math.max(mine.progress, 0.001)))
+      mineOverlay.set(cell, stage)
+      const hitSound = mine.sound >= 0.28
+      if (hitSound) {
+        mine.sound = 0
+      }
+      if (mine.progress >= 1) {
+        const result = finishBreak(cell)
+        stopMining()
+        return { broken: result, id: cell.id, hitSound: true }
+      }
+      return { mining: true, stage, hitSound, id: cell.id, progress: mine.progress }
+    },
+    stopMine() {
+      stopMining()
     },
     placeAt(screenX, screenY, fromX, fromY, layer = 'front') {
       const id = hotbar.selectedItem()
       if (!id) {
         return null
+      }
+      if (isFood(id) || isWeapon(id)) {
+        return { ok: false, error: isFood(id) ? 'eat food with right click' : 'weapons cannot place blocks' }
       }
       const z = layer === 'back' ? BACK_Z : FRONT_Z
       const world = screenToWorld(screenX, screenY)
@@ -229,10 +402,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     writePlayer(slots) {
       playerSlots = Array.from({ length: 27 }, (_, index) => {
         const stack = slots?.[index]
-        if (!stack?.id || stack.count < 1) {
-          return null
-        }
-        return { id: String(stack.id).replace(/^minecraft:/, ''), count: Math.min(64, Math.floor(stack.count)) }
+        return asStack(stack)
       })
       schedulePersist()
     },
@@ -394,12 +564,15 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     },
     async loadSave(data) {
       hotbar.read(data?.hotbar, data?.hand?.id)
+      survival.load(data?.survival)
+      gameMode = data?.game?.mode === 'creative' || data?.survival?.mode === 'creative' ? 'creative' : 'survival'
+      gameDifficulty = ['peaceful', 'easy', 'normal', 'hard'].includes(data?.game?.difficulty)
+        ? data.game.difficulty
+        : (['peaceful', 'easy', 'normal', 'hard'].includes(data?.survival?.difficulty) ? data.survival.difficulty : 'normal')
+      survival.configure({ mode: gameMode, difficulty: gameDifficulty })
       playerSlots = Array.from({ length: 27 }, (_, index) => {
         const stack = data?.inv?.[index]
-        if (!stack?.id || stack.count < 1) {
-          return null
-        }
-        return { id: String(stack.id).replace(/^minecraft:/, ''), count: Math.min(64, Math.floor(stack.count)) }
+        return asStack(stack)
       })
       mobs.load(data?.mobs)
       await batch(async () => {
@@ -425,6 +598,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
     tick(camera, delta) {
       handle?.sortTranslucent?.(camera)
       particles.tick(delta)
+      survival.tick(delta)
     },
     async demo() {
       await batch(async () => {
@@ -439,7 +613,7 @@ export async function createMc({ parent, bones, onPersist, getWindows, getTaskba
         await placeBlock(store, start + 1, 1, 'oak_fence')
         await placeBlock(store, start + 2, 1, 'oak_fence')
         await placeBlock(store, start + 7, 1, 'torch')
-        await hold('right', 'iron_sword')
+        await hold('right', hotbar.selectedItem())
       })
       return { ok: true }
     },

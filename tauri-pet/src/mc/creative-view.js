@@ -3,7 +3,7 @@ import { PlayerObject } from 'skinview3d'
 import { CREATIVE_ICON_INSET, drawGuiIcon, ICON_SIZE, PACK_ICON_INSET, renderGuiIcon } from './icon.js'
 import { loadCreativeTabs } from './creative.js'
 import { itemDisplayName, loadItemLang } from './lang.js'
-import { itemStack, stackCount, stackId } from './item-stack.js'
+import { asStack, itemStack, mergeInto, sameStack, stackCount, stackId, stackRoom } from './item-stack.js'
 
 const SCALE = 2
 const GUI_W = 195
@@ -502,8 +502,8 @@ export function createCreativeView({
     for (const tab of catalog) {
       wantIcon(tab.icon)
     }
-    for (const id of hotbar.slots) {
-      wantIcon(id)
+    for (const slot of hotbar.slots) {
+      wantIcon(stackId(slot))
     }
     wantIcon('chest')
     return stacks
@@ -511,8 +511,8 @@ export function createCreativeView({
 
   function paintCreativeBar() {
     const y = PANEL_Y + CREATIVE_BAR.y
-    liveHotbar().slots.forEach((id, index) => {
-      paintStack(id, 1, CREATIVE_BAR.x + index * CREATIVE_BAR.slot, y, CREATIVE_ICON_INSET)
+    liveHotbar().slots.forEach((slot, index) => {
+      paintStack(stackId(slot), stackCount(slot), CREATIVE_BAR.x + index * CREATIVE_BAR.slot, y, CREATIVE_ICON_INSET)
     })
   }
 
@@ -548,8 +548,8 @@ export function createCreativeView({
         PANEL_Y + PACK_INV.y + row * PACK_INV.pitch,
       )
     }
-    liveHotbar().slots.forEach((id, index) => {
-      paintStack(id, 1, PACK_BAR.x + index * PACK_BAR.pitch, PANEL_Y + PACK_BAR.y)
+    liveHotbar().slots.forEach((slot, index) => {
+      paintStack(stackId(slot), stackCount(slot), PACK_BAR.x + index * PACK_BAR.pitch, PANEL_Y + PACK_BAR.y)
     })
     if (hoverTrash) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'
@@ -618,7 +618,7 @@ export function createCreativeView({
       paint()
       return
     }
-    const next = itemStack(id, carried ? Math.min(64, carried.count + 1) : 1)
+    const next = itemStack(id, carried && carried.id === id ? carried.count + 1 : 1)
     if (!next) {
       return
     }
@@ -688,28 +688,23 @@ export function createCreativeView({
 
   function placeHotbar(index) {
     const state = getHotbar?.() ?? hotbar
-    const current = state.slots[index]
-    if (carried) {
-      onSetSlot?.(index, carried.id)
-      carried = current ? itemStack(current, 1) : null
+    const current = asStack(state.slots[index])
+    if (carried && current && sameStack(current, carried)) {
+      const merged = mergeInto(current, carried)
+      onSetSlot?.(index, merged.dest)
+      carried = merged.leftover
+    } else if (carried) {
+      onSetSlot?.(index, carried)
+      carried = current
     } else if (current) {
-      carried = itemStack(current, 1)
+      carried = current
       onSetSlot?.(index, null)
     }
     paint()
   }
 
   function clickCreativeBar(index) {
-    const state = getHotbar?.() ?? hotbar
-    const current = state.slots[index]
-    if (carried) {
-      onSetSlot?.(index, carried.id)
-      carried = current ? itemStack(current, 1) : null
-    } else if (current) {
-      carried = itemStack(current, 1)
-      onSetSlot?.(index, null)
-    }
-    paint()
+    placeHotbar(index)
   }
 
   function packBarAt(point) {
@@ -767,10 +762,10 @@ export function createCreativeView({
     const packs = playerItems()
     for (let index = 0; index < packs.length && carried; index += 1) {
       const stack = packs[index]
-      if (!stack || stack.id !== carried.id || stack.count >= 64) {
+      if (!stack || !sameStack(stack, carried) || stackRoom(stack) < 1) {
         continue
       }
-      const move = Math.min(64 - stack.count, carried.count)
+      const move = Math.min(stackRoom(stack), carried.count)
       stack.count += move
       carried.count -= move
       if (carried.count <= 0) {
@@ -817,8 +812,8 @@ export function createCreativeView({
     } else if (carried && !stack) {
       packs[invIndex] = carried
       carried = null
-    } else if (carried && stack && stack.id === carried.id && stack.count < 64) {
-      const move = Math.min(64 - stack.count, carried.count)
+    } else if (carried && stack && sameStack(stack, carried) && stackRoom(stack) > 0) {
+      const move = Math.min(stackRoom(stack), carried.count)
       stack.count += move
       carried.count -= move
       if (carried.count <= 0) {
@@ -873,7 +868,7 @@ export function createCreativeView({
       }
       const bar = packBarAt(point)
       if (bar >= 0) {
-        return liveHotbar().slots[bar] ?? null
+        return stackId(liveHotbar().slots[bar]) || null
       }
       const inv = packSlotAt(point)
       if (inv >= 0) {
@@ -883,7 +878,7 @@ export function createCreativeView({
     }
     const bar = creativeBarAt(point)
     if (bar >= 0) {
-      return liveHotbar().slots[bar] ?? null
+      return stackId(liveHotbar().slots[bar]) || null
     }
     const index = slotAt(point)
     return index >= 0 ? stackId(items()[index]) : null

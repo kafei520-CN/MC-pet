@@ -354,6 +354,8 @@ export function createMobs(root) {
       walkWait: 2 + Math.random() * 4,
       path: null,
       pi: 0,
+      health: 10,
+      hurt: 0,
     }
     next += 1
     return mob
@@ -367,7 +369,10 @@ export function createMobs(root) {
   }
 
   function step(dt, getBlock, extraSolids = [], helpers = { supportAt: (wx, fromY) => Math.max(0, fromY) }) {
-    for (const mob of mobs) {
+    for (const mob of mobs.slice()) {
+      if (mob.hurt > 0) {
+        mob.hurt = Math.max(0, mob.hurt - dt)
+      }
       steerMob(mob, dt, getBlock, extraSolids, helpers)
       mob.vy -= 32 * dt
       let x = mob.x + mob.vx * dt
@@ -412,7 +417,41 @@ export function createMobs(root) {
   }
 
   function save() {
-    return mobs.map((mob) => ({ type: mob.type, x: mob.x, y: mob.y }))
+    return mobs.map((mob) => ({ type: mob.type, x: mob.x, y: mob.y, health: mob.health }))
+  }
+
+  function attackAt(x, y, damage, reach = 2.8) {
+    const wx = Number(x)
+    const wy = Number(y)
+    const amount = Math.max(0, Number(damage) || 0)
+    if (!Number.isFinite(wx) || !Number.isFinite(wy) || !amount) {
+      return { ok: false, error: 'invalid attack' }
+    }
+    let target = null
+    let distance = Infinity
+    for (const mob of mobs) {
+      const dx = Math.abs(mob.x - wx)
+      const dy = Math.abs((mob.y + mob.hh * 0.5) - wy)
+      const range = Math.max(0.65, mob.hw) + 0.2
+      if (dx <= range && dy <= 1.2 && dx + dy < distance && dx <= reach) {
+        target = mob
+        distance = dx + dy
+      }
+    }
+    if (!target) {
+      return { ok: false, error: 'no target' }
+    }
+    target.health = Math.max(0, target.health - amount)
+    target.hurt = 0.22
+    if (target.health <= 0) {
+      const index = mobs.indexOf(target)
+      if (index >= 0) {
+        mobs.splice(index, 1)
+      }
+      drop(target)
+      return { ok: true, killed: true, target: target.type, damage: amount }
+    }
+    return { ok: true, target: target.type, health: target.health, damage: amount }
   }
 
   function load(list) {
@@ -424,10 +463,11 @@ export function createMobs(root) {
         continue
       }
       const mob = makeMob(item.type, Number(item.x) || 0.5, Number(item.y) || 0)
+      mob.health = Math.max(1, Math.min(10, Number(item.health) || 10))
       mobs.push(mob)
       void attach(mob)
     }
   }
 
-  return { spawn, step, save, load, isSpawnEgg, eggType }
+  return { spawn, step, save, load, attackAt, isSpawnEgg, eggType }
 }

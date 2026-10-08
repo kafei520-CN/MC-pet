@@ -1,5 +1,6 @@
 import { drawGuiIcon, renderGuiIcon } from './icon.js'
 import { selectDuration } from './hotbar.js'
+import { stackCount, stackId } from './item-stack.js'
 
 const GUI = 2
 const HOTBAR = { x: 0, y: 0, w: 182, h: 22 }
@@ -116,11 +117,20 @@ export function createHotbarView() {
       HOTBAR.h * scale,
     )
     for (let index = 0; index < slots.length; index += 1) {
-      const icon = icons.get(slots[index])
+      const id = stackId(slots[index])
+      const icon = icons.get(id)
       if (!icon) {
         continue
       }
       drawGuiIcon(ctx, icon, PAD + 2 + index * PITCH, PAD + 2, scale)
+      const count = stackCount(slots[index])
+      if (count > 1) {
+        ctx.font = `${8 * scale}px "Segoe UI", sans-serif`
+        ctx.fillStyle = '#3f3f3f'
+        ctx.fillText(String(count), (PAD + 2 + index * PITCH + 11) * scale, (PAD + 2 + 16) * scale)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillText(String(count), (PAD + 2 + index * PITCH + 10) * scale, (PAD + 2 + 15) * scale)
+      }
     }
     const slot = displayed()
     ctx.drawImage(
@@ -141,12 +151,12 @@ export function createHotbarView() {
       root.hidden = !on
     },
     sync(state) {
-      const nextKey = state.slots.join('|')
+      const nextKey = state.slots.map((slot) => (slot ? `${stackId(slot)}:${stackCount(slot)}` : '')).join('|')
       if (nextKey !== slotKey) {
         slotKey = nextKey
         slots = state.slots.slice()
-        for (const id of slots) {
-          wantIcon(id)
+        for (const slot of slots) {
+          wantIcon(stackId(slot))
         }
         paint()
       }

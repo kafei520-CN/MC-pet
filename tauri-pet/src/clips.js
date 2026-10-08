@@ -66,7 +66,7 @@ const CLIPS = {
       'leftArm.rotation.x': [[0, -0.35], [0.55, -0.15], [1.1, -0.35]],
       'rightArm.rotation.x': [[0, -0.2], [0.55, -0.45], [1.1, -0.2]],
       'leftArm.rotation.z': [[0, 0.45], [1.1, 0.45]],
-      'rightArm.rotation.z': [[0, -0.45], [1.1, -0.45]],
+      'rightArm.rotation.z': [[0, -0.45], [1.1, 0.45]],
       'leftLeg.rotation.x': [[0, 0.05], [0.35, 0.38], [0.7, 0.05], [1.1, 0.05]],
       'rightLeg.rotation.x': [[0, 0.2], [0.55, -0.05], [1.1, 0.2]],
     },

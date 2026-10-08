@@ -1,17 +1,18 @@
 import { bareId } from './ids.js'
+import { asStack, itemStack, stackId } from './item-stack.js'
 
 export const HOTBAR_SIZE = 9
 
 export const STARTER_ITEMS = [
+  'wooden_sword',
+  'apple',
+  'bread',
   'grass_block',
   'dirt',
-  'cobblestone',
   'oak_planks',
   'oak_log',
-  'oak_leaves',
   'stone',
-  'glass',
-  'oak_fence',
+  'torch',
 ]
 
 export function swapDuration(distance) {
@@ -28,11 +29,16 @@ function emptySlots() {
   return Array.from({ length: HOTBAR_SIZE }, () => null)
 }
 
+function copySlot(slot) {
+  const stack = asStack(slot)
+  return stack ? { id: stack.id, count: stack.count } : null
+}
+
 function nearestSlot(slots, selected, id) {
   let found = -1
   let best = Infinity
   for (let index = 0; index < slots.length; index += 1) {
-    if (slots[index] !== id) {
+    if (stackId(slots[index]) !== id) {
       continue
     }
     const distance = Math.abs(index - selected)
@@ -50,19 +56,19 @@ export function createHotbar() {
 
   function seed(handId) {
     for (let index = 0; index < HOTBAR_SIZE; index += 1) {
-      slots[index] = STARTER_ITEMS[index] ?? null
+      slots[index] = itemStack(STARTER_ITEMS[index], 1)
     }
     selected = 0
     const held = bareId(handId)
     if (!held) {
       return
     }
-    const found = slots.indexOf(held)
+    const found = slots.findIndex((slot) => stackId(slot) === held)
     if (found >= 0) {
       selected = found
       return
     }
-    slots[0] = held
+    slots[0] = itemStack(held, 1)
   }
 
   seed()
@@ -72,13 +78,13 @@ export function createHotbar() {
     state() {
       return {
         selected,
-        slots: slots.slice(),
+        slots: slots.map(copySlot),
       }
     },
     save() {
       return {
         selected,
-        slots: slots.slice(),
+        slots: slots.map(copySlot),
       }
     },
     read(saved, handId) {
@@ -88,40 +94,55 @@ export function createHotbar() {
         return
       }
       for (let index = 0; index < HOTBAR_SIZE; index += 1) {
-        const name = bareId(incoming[index])
-        slots[index] = name || null
+        slots[index] = asStack(incoming[index])
       }
       const next = Number(saved.selected)
       selected = Number.isInteger(next) && next >= 0 && next < HOTBAR_SIZE ? next : 0
     },
     selectedItem() {
-      return slots[selected]
+      return stackId(slots[selected]) || null
     },
-    setSlot(index, id) {
-      if (!Number.isInteger(index) || index < 0 || index >= HOTBAR_SIZE) {
-        return { selected, id: slots[selected] }
+    selectedStack() {
+      return copySlot(slots[selected])
+    },
+    consumeSelected() {
+      const stack = slots[selected]
+      if (!stack) {
+        return null
       }
-      slots[index] = bareId(id) || null
-      return { selected, id: slots[selected] }
+      const id = stackId(stack)
+      if (stack.count <= 1) {
+        slots[selected] = null
+      } else {
+        slots[selected] = { id, count: stack.count - 1 }
+      }
+      return id
+    },
+    setSlot(index, value) {
+      if (!Number.isInteger(index) || index < 0 || index >= HOTBAR_SIZE) {
+        return { selected, id: stackId(slots[selected]) || null }
+      }
+      slots[index] = asStack(value)
+      return { selected, id: stackId(slots[selected]) || null }
     },
     selectIndex(index) {
       if (!Number.isInteger(index) || index < 0 || index >= HOTBAR_SIZE) {
-        return { selected, id: slots[selected] }
+        return { selected, id: stackId(slots[selected]) || null }
       }
       selected = index
-      return { selected, id: slots[selected] }
+      return { selected, id: stackId(slots[selected]) || null }
     },
     cycle(step) {
       const delta = step >= 0 ? 1 : -1
       selected = (selected + delta + HOTBAR_SIZE) % HOTBAR_SIZE
-      return { selected, id: slots[selected] }
+      return { selected, id: stackId(slots[selected]) || null }
     },
     commit(id) {
       const name = bareId(id)
       if (!name) {
         return { id: null, direction: 0, distance: 0, selected }
       }
-      if (slots[selected] === name) {
+      if (stackId(slots[selected]) === name) {
         return { id: name, direction: 0, distance: 0, selected }
       }
       const found = nearestSlot(slots, selected, name)
@@ -131,7 +152,7 @@ export function createHotbar() {
         selected = found
         return { id: name, direction, distance, selected }
       }
-      slots[selected] = name
+      slots[selected] = itemStack(name, 1)
       return { id: name, direction: 0, distance: 0, selected, replaced: true }
     },
   }

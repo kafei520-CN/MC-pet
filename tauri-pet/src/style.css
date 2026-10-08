@@ -43,6 +43,74 @@ body {
   image-rendering: pixelated;
 }
 
+#survival-hud {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 7;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+#survival-hud[hidden] {
+  display: none !important;
+}
+
+.survival-row {
+  display: flex;
+  height: 18px;
+  align-items: center;
+}
+
+.survival-row.hunger {
+  flex-direction: row-reverse;
+}
+
+.survival-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-right: -2px;
+  image-rendering: pixelated;
+  background-image: url('/resource-pack/minecraft/textures/gui/icons.png');
+  background-repeat: no-repeat;
+  background-size: 512px 512px;
+}
+
+.survival-row.hunger .survival-icon {
+  margin-right: 0;
+  margin-left: -2px;
+}
+
+/* icons.png is 256x256. 9x9 sprites at GUI scale 2: empty 16, half 61, full 52.
+   Hunger sits on row y=27. */
+.survival-icon.health.empty {
+  background-position: -32px 0;
+}
+
+.survival-icon.health.half {
+  background-position: -122px 0;
+}
+
+.survival-icon.health.full {
+  background-position: -104px 0;
+}
+
+.survival-icon.hunger.empty {
+  background-position: -32px -54px;
+}
+
+.survival-icon.hunger.half {
+  background-position: -122px -54px;
+}
+
+.survival-icon.hunger.full {
+  background-position: -104px -54px;
+}
+
 body.controlling {
   cursor: none;
 }

@@ -222,6 +222,10 @@ export function playBreak(id) {
   playFile('break', id, 0.72)
 }
 
+export function playDig(id) {
+  playFile('dig', id, 0.4)
+}
+
 export function playPlace(id) {
   playFile('place', id, 0.7)
 }

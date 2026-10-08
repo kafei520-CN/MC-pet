@@ -1,4 +1,5 @@
 import { drawGuiIcon, renderGuiIcon } from './icon.js'
+import { asStack, maxStackSize, sameStack, stackRoom } from './item-stack.js'
 import { fuelTime, loadRecipes, matchCook, matchCraft, matchSmithing } from './recipes.js'
 import {
   containerSize,
@@ -91,8 +92,8 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
     }
     if (slot.role === 'hotbar') {
       const live = getHotbar?.()
-      const id = live?.slots?.[slot.index] ?? hotbar[slot.index]
-      return id ? { id, count: 1 } : null
+      const value = live?.slots?.[slot.index] ?? hotbar[slot.index]
+      return asStack(value)
     }
     if (slot.role === 'craft') {
       return items[slot.index]
@@ -207,8 +208,8 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
       return
     }
     if (slot.role === 'hotbar') {
-      hotbar[slot.index] = next?.id ?? null
-      onHotbar?.(slot.index, hotbar[slot.index])
+      hotbar[slot.index] = next
+      onHotbar?.(slot.index, next)
       return
     }
     items[slot.index] = next
@@ -279,9 +280,9 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
         putStack(slot, cursorStack)
         cursorStack = null
       }
-    } else if (current.id === cursorStack.id) {
-      const room = 64 - current.count
-      const move = right ? 1 : Math.min(room, cursorStack.count)
+    } else if (sameStack(current, cursorStack)) {
+      const room = stackRoom(current)
+      const move = right ? Math.min(1, room, cursorStack.count) : Math.min(room, cursorStack.count)
       if (move > 0) {
         putStack(slot, { id: current.id, count: current.count + move })
         cursorStack = normalizeStack({ id: cursorStack.id, count: cursorStack.count - move })
@@ -304,10 +305,11 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
       return entry.role === 'block' || entry.role === 'craft'
     })
     let left = stack.count
+    const max = maxStackSize(stack)
     for (const target of targets) {
       const there = stackAt(target)
-      if (there?.id === stack.id && there.count < 64) {
-        const move = Math.min(64 - there.count, left)
+      if (there && sameStack(there, stack) && there.count < max) {
+        const move = Math.min(max - there.count, left)
         putStack(target, { id: stack.id, count: there.count + move })
         left -= move
       }
@@ -317,7 +319,7 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
         break
       }
       if (!stackAt(target)) {
-        const move = Math.min(64, left)
+        const move = Math.min(max, left)
         putStack(target, { id: stack.id, count: move })
         left -= move
       }
@@ -376,7 +378,7 @@ export function createStationView({ onSave, onHotbar, onClose, getHotbar } = {})
       return
     }
     const output = items[2]
-    if (output && (output.id !== recipe.result.id || output.count + recipe.result.count > 64)) {
+    if (output && (output.id !== recipe.result.id || output.count + recipe.result.count > maxStackSize(recipe.result.id))) {
       return
     }
     if (cookLeft <= 0) {

@@ -51,6 +51,17 @@ export class MateActionController {
     return this.current === name
   }
 
+  interruptForMove() {
+    if (!TRANSIENT_ACTIONS.has(this.current)) {
+      return false
+    }
+    this.current = 'idle'
+    this.elapsed = 0
+    this.lockedUntil = 0
+    this.manual = false
+    return true
+  }
+
   play(name, options = {}) {
     if (!MATE_ACTIONS[name]) {
       return false
@@ -98,6 +109,10 @@ export class MateActionController {
 
   update(delta, context = {}) {
     this.elapsed += delta
+    if (context.moving && TRANSIENT_ACTIONS.has(this.current)) {
+      this.play('walk', { manual: false, duration: 0 })
+      return this.current
+    }
     if (this.lockedUntil > 0 && this.elapsed < this.lockedUntil) {
       return this.current
     }

@@ -10,18 +10,21 @@ import { createDoll, grabNeck, releaseDoll, releaseNeck, stepDoll, syncDoll } fr
 import { createChicken, flapChicken, holdChickenLeg } from './chicken.js'
 import { createMc } from './mc/index.js'
 import { BLOCK_PX, SCALE, screenToWorld, worldToScreen } from './mc/scale.js'
-import { atScreenTop, frontCovers, seatAt, seatXOn } from './mc/window-order.js'
+import { atScreenTop, frontCovers, seatAbove, seatAt, seatEdge, seatEntered, seatXOn } from './mc/window-order.js'
 import { resolveEdgeX, rimClimbFace, stepScreenRim } from './mc/screen-edge.js'
 import { lightLevels } from './mc/daylight.js'
 import { parseSchematic } from './mc/build.js'
 import { choosePlaceStand, feetInside } from './mc/place-tree.js'
-import { playBreak, playPlace, playStep } from './mc/sounds.js'
+import { playBreak, playDig, playPlace, playStep } from './mc/sounds.js'
 import { swapDuration } from './mc/hotbar.js'
 import { createHotbarView } from './mc/hotbar-view.js'
+import { createSurvivalView } from './mc/survival-view.js'
 import { createCreativeView } from './mc/creative-view.js'
 import { createStationView } from './mc/station-view.js'
 import { stationKind } from './mc/stations.js'
 import { applySwapArm } from './mc/swap-arm.js'
+import { isFood, isWeapon } from './mc/survival.js'
+import { difficultyLabel, gameModeLabel } from './mc/world-create.js'
 import starterSchematic from './mc/schematic.json'
 
 const ANDROID = typeof window.PetBridge !== 'undefined'
@@ -121,6 +124,7 @@ const pointer = { x: 180, y: 200 }
 const headPoint = new THREE.Vector3()
 const headTop = new THREE.Vector3()
 const hotbarView = createHotbarView()
+const survivalView = createSurvivalView()
 const stationView = createStationView({
   getHotbar: () => mcWorld?.hotbarState(),
   onClose: ({ where, parts }) => {
@@ -248,6 +252,7 @@ let fling = null
 let doll = null
 let dragSample = null
 let dragVel = { x: 0, y: 0 }
+let dragTrail = []
 let poseTime = 0
 let poseName = ''
 let chicken = null
@@ -264,7 +269,7 @@ function resize() {
   camera.updateProjectionMatrix()
   renderer.setSize(width, height, false)
   mcWorld?.layout()
-  if (!holding && pet.mode !== 'sit') {
+  if (!holding && !pinned && pet.mode !== 'sit') {
     pet.y = floorY()
   }
 }
@@ -300,6 +305,21 @@ function beginLand() {
 
 const FALL_DOWN_SPEED = 14.9
 
+function pinInPlace() {
+  pinned = true
+  falling = false
+  shortFall = false
+  wander = null
+  climb = null
+  pet.vy = 0
+  pet.vx = 0
+  pet.onGround = true
+  pet.mode = 'idle'
+  if (phase === 'drop' || phase === 'land' || phase === 'fall') {
+    phase = null
+  }
+}
+
 function standUp() {
   hideChicken()
   falling = false
@@ -311,10 +331,68 @@ function standUp() {
     phase = null
   }
   pet.y = floorY()
+  sitIfOnWindow()
+}
+
+function sitIfOnWindow() {
+  if (holding || pet.seatId || climb) {
+    return
+  }
+  if (phase === 'ragdoll' || phase === 'leap' || phase === 'glance' || phase === 'build' || phase === 'drop') {
+    return
+  }
+  if (controlling && (controlKeys.a !== controlKeys.d || controlKeys.w)) {
+    return
+  }
+  let seat = null
+  let best = 96
+  for (const win of windows) {
+    if (!win || atScreenTop(win)) {
+      continue
+    }
+    if (pet.x < win.x + 4 || pet.x > win.x + win.width - 4) {
+      continue
+    }
+    if (ignoreSeatId && win.id === ignoreSeatId) {
+      continue
+    }
+    const dist = Math.abs(pet.y - win.y)
+    if (dist < best) {
+      seat = win
+      best = dist
+    }
+  }
+  if (!seat) {
+    return
+  }
+  falling = false
+  shortFall = false
+  wander = null
+  if (phase === 'land' || phase === 'fall') {
+    phase = null
+  }
+  if (!sitOn(seat, pet.x)) {
+    pet.x = Math.min(seat.x + seat.width - 12, Math.max(seat.x + 12, pet.x))
+    pet.seatOffset = pet.x - seat.x
+    pet.seatId = seat.id
+    ignoreSeatId = null
+    pinned = false
+    windowGone = false
+    pet.vy = 0
+    pet.vx = 0
+    pet.onGround = true
+    pet.y = seat.y
+    pet.mode = 'sit'
+  }
+  frameChoice = 'sit'
+  actions.handle('sit')
 }
 
 function settleLanding(worldVy) {
   const impact = Math.max(0, -(worldVy || 0))
+  if (impact > 3) {
+    mcWorld?.damagePlayer?.(Math.floor(impact - 3))
+  }
   if (impact >= FALL_DOWN_SPEED && phase !== 'build' && phase !== 'ragdoll') {
     launchDoll((pet.vx || 0) * BLOCK_PX, impact * BLOCK_PX)
     return
@@ -342,16 +420,9 @@ function floorY() {
   return window.innerHeight
 }
 
-function nearBlockStand(x, y) {
-  if (!mcWorld?.blockSupportScreenY) {
-    return false
-  }
-  const stand = mcWorld.blockSupportScreenY(x, y)
-  return Math.abs(stand - y) < 64
-}
-
 let liveSeat = null
 let seatBusy = false
+let pinned = false
 
 async function refreshWindows() {
   const map = await invoke('desktop_map')
@@ -359,15 +430,25 @@ async function refreshWindows() {
   taskbar = map.taskbar ?? null
 }
 
+function trackedWindowId() {
+  if (pet.seatId) {
+    return pet.seatId
+  }
+  if (climb?.kind === 'edge' && climb.winId) {
+    return climb.winId
+  }
+  return null
+}
+
 function pollSeat() {
-  if (!pet.seatId || seatBusy) {
+  const id = trackedWindowId()
+  if (!id || seatBusy) {
     return
   }
-  const id = pet.seatId
   seatBusy = true
   invoke('seat_rect', { id })
     .then((rect) => {
-      if (pet.seatId === id && rect) {
+      if (trackedWindowId() === id && rect) {
         liveSeat = rect
       }
     })
@@ -393,12 +474,12 @@ function trySit(x, y, allowCurrent) {
   if (!allowCurrent && avoidSeat && stillOver(avoidSeat, x, y)) {
     return false
   }
-  if (nearBlockStand(x, y)) {
+  const seat = seatEntered(windows, x, y) || seatEdge(windows, x, y)
+  if (!seat) {
     return false
   }
   avoidSeat = null
-  const seat = windowUnder(x, y)
-  if (!seat || !sitOn(seat, x)) {
+  if (!sitOn(seat, x)) {
     return false
   }
   pressing = false
@@ -416,6 +497,13 @@ function sitOn(win, x) {
   pet.seatOffset = pet.x - win.x
   pet.seatId = win.id
   ignoreSeatId = null
+  pinned = false
+  falling = false
+  shortFall = false
+  windowGone = false
+  pet.vy = 0
+  pet.vx = 0
+  pet.onGround = true
   pet.y = win.y
   pet.mode = 'sit'
   wander = null
@@ -507,7 +595,39 @@ function beginDragDoll(x, y) {
   wander = null
   dragSample = { x, y }
   dragVel = { x: 0, y: 0 }
+  dragTrail = [{ x, y, t: performance.now() }]
   grabNeck(doll, x, y)
+}
+
+function noteDrag(x, y) {
+  const now = performance.now()
+  dragTrail.push({ x, y, t: now })
+  const keep = now - 120
+  while (dragTrail.length > 1 && dragTrail[0].t < keep) {
+    dragTrail.shift()
+  }
+}
+
+function throwVelocity() {
+  const newest = dragTrail[dragTrail.length - 1]
+  if (!newest) {
+    return { x: dragVel.x, y: dragVel.y }
+  }
+  let oldest = newest
+  for (let i = dragTrail.length - 1; i >= 0; i -= 1) {
+    if (newest.t - dragTrail[i].t > 50) {
+      break
+    }
+    oldest = dragTrail[i]
+  }
+  const dt = (newest.t - oldest.t) / 1000
+  if (dt < 0.008) {
+    return { x: dragVel.x, y: dragVel.y }
+  }
+  return {
+    x: (newest.x - oldest.x) / dt,
+    y: (newest.y - oldest.y) / dt,
+  }
 }
 
 function dragVelocity(delta) {
@@ -544,6 +664,36 @@ function launchDoll(vx, vy) {
   }
 }
 
+function seatedWindow() {
+  if (!pet.seatId) {
+    return null
+  }
+  const listed = windows.find((item) => item.id === pet.seatId)
+  if (!listed) {
+    return null
+  }
+  if (liveSeat && liveSeat.id === listed.id) {
+    listed.x = liveSeat.x
+    listed.y = liveSeat.y
+    listed.width = liveSeat.width
+    listed.height = liveSeat.height
+  }
+  return listed
+}
+
+function bindSeat(win) {
+  if (!win || phase === 'fling') {
+    return
+  }
+  const left = win.x + 8
+  const right = Math.max(left, win.x + win.width - 8)
+  pet.x = Math.min(right, Math.max(left, win.x + (pet.seatOffset || 0)))
+  pet.y = win.y
+  pet.vx = 0
+  pet.vy = 0
+  pet.mode = 'sit'
+}
+
 function followSeat() {
   if (holding || falling || phase === 'leap' || phase === 'ragdoll' || phase === 'glance' || !pet.seatId) {
     if (!pet.seatId) {
@@ -551,27 +701,14 @@ function followSeat() {
     }
     return
   }
-  const listed = windows.find((item) => item.id === pet.seatId)
-  const win = listed && liveSeat && liveSeat.id === listed.id
-    ? { ...listed, x: liveSeat.x, y: liveSeat.y, width: liveSeat.width, height: liveSeat.height }
-    : listed
+  const win = seatedWindow()
   if (!win || atScreenTop(win)) {
-    windowGone = true
-    return
-  }
-  const seatX = seatXOn(win, windows, win.x + pet.seatOffset)
-  if (seatX == null || frontCovers(windows, seatX, win.y, win.id)) {
     windowGone = true
     return
   }
   windowGone = false
   noteWindowShake(win)
-  if (phase === 'fling') {
-    return
-  }
-  pet.x = seatX
-  pet.y = win.y
-  pet.mode = 'sit'
+  bindSeat(win)
 }
 
 function catchSeat() {
@@ -581,12 +718,15 @@ function catchSeat() {
   if (avoidSeat && stillOver(avoidSeat, pet.x, pet.y)) {
     return
   }
-  if (nearBlockStand(pet.x, pet.y)) {
-    return
-  }
   const seat = windowUnder(pet.x, pet.y, ignoreSeatId)
   if (!seat || Math.abs(pet.y - seat.y) > 28) {
     return
+  }
+  if (mcWorld?.blockSupportScreenY) {
+    const stand = mcWorld.blockSupportScreenY(pet.x, pet.y)
+    if (Math.abs(stand - pet.y) + 8 < Math.abs(seat.y - pet.y)) {
+      return
+    }
   }
   if (!sitOn(seat, pet.x)) {
     return
@@ -596,6 +736,7 @@ function catchSeat() {
 
 function beginWander() {
   menuSleep = false
+  pinned = false
   pet.seatId = null
   pet.mode = 'idle'
   if (ANDROID && window.PetBridge) {
@@ -830,6 +971,7 @@ function tryBezelClimb() {
 }
 
 function beginEdgeClimb(hit) {
+  const top = hit.top
   climb = {
     kind: 'edge',
     stage: controlKeys.w ? 'up' : 'hang',
@@ -837,9 +979,11 @@ function beginEdgeClimb(hit) {
     face: hit.face,
     edge: hit.edge,
     outside: hit.outside,
-    top: hit.top,
+    top,
     bottom: hit.win ? hit.win.y + hit.win.height : window.innerHeight - 4,
     mountX: hit.mountX ?? (hit.face > 0 ? hit.edge + 36 : hit.edge - 36),
+    winId: hit.win?.id ?? null,
+    yRel: top == null ? 0 : pet.y - top,
   }
   poseTime = 0
   poseName = controlKeys.w ? 'PET_EDGE_CLIMB' : 'PET_EDGE_HANG'
@@ -870,13 +1014,48 @@ function beginClimb(hint) {
   pet.jumping = false
 }
 
+function edgeWindow() {
+  if (!climb?.winId) {
+    return null
+  }
+  const listed = windows.find((item) => item.id === climb.winId)
+  if (liveSeat && liveSeat.id === climb.winId) {
+    if (listed) {
+      listed.x = liveSeat.x
+      listed.y = liveSeat.y
+      listed.width = liveSeat.width
+      listed.height = liveSeat.height
+      return listed
+    }
+    return liveSeat
+  }
+  return listed || null
+}
+
+function followEdgeWindow() {
+  const win = edgeWindow()
+  if (!win) {
+    return
+  }
+  climb.edge = climb.face > 0 ? win.x : win.x + win.width
+  climb.top = win.y
+  climb.bottom = win.y + win.height
+  climb.mountX = climb.face > 0 ? win.x + 36 : win.x + win.width - 36
+  if (climb.yRel == null) {
+    climb.yRel = pet.y - win.y
+  }
+  pet.y = win.y + climb.yRel
+}
+
 function stepClimb(delta) {
   if (climb.kind === 'edge') {
     if (creativeView.isOpen() || stationView.isOpen()) {
+      followEdgeWindow()
       pet.vy = 0
       pet.onGround = false
       return
     }
+    followEdgeWindow()
     const margin = climb.outside ? 28 : 16
     let x = climb.face > 0 ? climb.edge - margin : climb.edge + margin
     if (climb.outside) {
@@ -903,6 +1082,7 @@ function stepClimb(delta) {
         poseName = 'PET_EDGE_CLIMB'
       }
       pet.y = Math.max(climb.top + 4, pet.y - 92 * delta)
+      climb.yRel = pet.y - climb.top
       if (pet.y <= climb.top + 6) {
         pet.x = climb.mountX
         pet.y = climb.top
@@ -919,6 +1099,7 @@ function stepClimb(delta) {
         poseName = 'PET_EDGE_CLIMB'
       }
       pet.y = Math.min(ground, pet.y + 92 * delta)
+      climb.yRel = pet.y - climb.top
     }
     if (climb.aboveGround && pet.y >= ground - 4) {
       pet.y = ground
@@ -967,6 +1148,7 @@ function stepClimb(delta) {
 }
 
 function startFall() {
+  pinned = false
   wander = null
   if (pet.seatId) {
     ignoreSeatId = pet.seatId
@@ -1122,6 +1304,10 @@ async function stepBuild(delta) {
 
 function think(delta) {
   actions.elapsed += delta
+  const steering = controlling && (controlKeys.a !== controlKeys.d || controlKeys.w)
+  if (holding || falling || climb || wander || steering) {
+    actions.interruptForMove()
+  }
   if (holding) {
     climb = null
   }
@@ -1152,7 +1338,7 @@ function think(delta) {
     wander: Boolean(wander),
     menuSleep,
     locked,
-    calm,
+    calm: pinned ? 0 : calm,
     idleWait,
   })
   if (choice !== 'walk' && choice !== 'wander' && choice !== 'build' && choice !== 'climb') {
@@ -1394,12 +1580,13 @@ function lookAround(delta) {
 }
 
 function place(delta) {
-  tickBlockHold()
+  tickBlockHold(delta)
   stationView.tick(delta)
-  frameChoice = think(delta)
   if (controlling) {
     steerControl()
-  } else if (phase === 'build') {
+  }
+  frameChoice = think(delta)
+  if (!controlling && phase === 'build') {
     stepBuild(delta)
   }
   const moving = controlling
@@ -1424,7 +1611,7 @@ function place(delta) {
   }
   if (holding && phase === 'ragdoll' && doll) {
     const vel = dragVelocity(delta)
-    if (Math.hypot(vel.x, vel.y) > 2800) {
+    if (Math.hypot(vel.x, vel.y) > 2800 && !seatEntered(windows, pet.x, pet.y)) {
       releaseNeck(doll, vel.x, vel.y)
       holding = false
       pressing = false
@@ -1480,7 +1667,7 @@ function place(delta) {
     }
   } else if (climb) {
     stepClimb(delta)
-  } else if (mcWorld && !holding && phase !== 'ragdoll' && phase !== 'glance' && phase !== 'leap' && phase !== 'drop' && phase !== 'land' && !pet.seatId) {
+  } else if (mcWorld && !pinned && !holding && phase !== 'ragdoll' && phase !== 'glance' && phase !== 'leap' && phase !== 'drop' && phase !== 'land' && !pet.seatId) {
     const incomingVy = pet.vy || 0
     const wasGround = !!pet.onGround
     mcWorld.stepActor(pet, delta, {
@@ -1507,9 +1694,10 @@ function place(delta) {
       if (!falling) {
         hideChicken()
       }
+      sitIfOnWindow()
       catchSeat()
     }
-  } else if (falling) {
+  } else if (falling && !pinned) {
     pet.y = Math.min(floorY(), pet.y + 46 * delta)
     if (pet.y >= floorY() - 1) {
       pet.y = floorY()
@@ -1519,11 +1707,13 @@ function place(delta) {
         chicken.group.visible = false
       }
       actions.handle('drag-end')
+      sitIfOnWindow()
       catchSeat()
     }
-  } else if (!holding && pet.mode === 'idle') {
+  } else if (!pinned && !holding && pet.mode === 'idle') {
     pet.y += (floorY() - pet.y) * Math.min(1, delta * 8)
     if (Math.abs(floorY() - pet.y) < 2) {
+      sitIfOnWindow()
       catchSeat()
     }
   }
@@ -1545,6 +1735,13 @@ function place(delta) {
   }
   updateFootsteps()
   applyDaylight()
+  sitIfOnWindow()
+  if (pet.seatId && !holding) {
+    const win = seatedWindow()
+    if (win && !atScreenTop(win)) {
+      bindSeat(win)
+    }
+  }
   rig.position.set(pet.x, -pet.y, BLOCK_PX)
   applyPose(delta)
   updateHotbar(delta)
@@ -1586,6 +1783,7 @@ function updateHotbar(delta) {
     }
     hotbarSeen = { selected: state.selected, key }
     hotbarView.sync(state)
+    survivalView.sync(mcWorld.survivalState?.())
     if (creativeView.isOpen()) {
       creativeView.syncHotbar(state)
     }
@@ -1597,12 +1795,19 @@ function updateHotbar(delta) {
   hotbarView.tick(delta)
   const show = !hidden && rig.visible && !stationView.isOpen() && (controlling || switching)
   hotbarView.setVisible(show)
+  const showSurvival = show && controlling && !isCreative() && !creativeView.isOpen()
+  survivalView.setVisible(showSurvival)
   if (!show) {
     return
   }
   headTop.set(0, 9, 0)
   bones.head.localToWorld(headTop)
-  hotbarView.place(headTop.x, -headTop.y)
+  const hx = headTop.x
+  const hy = -headTop.y
+  hotbarView.place(hx, hy)
+  if (showSurvival) {
+    survivalView.place(hx, hy)
+  }
 }
 
 function bodyHeight() {
@@ -1859,9 +2064,18 @@ function showPetMenu(x, y) {
   if (button) {
     button.textContent = controlling ? '结束控制' : '控制'
   }
+  const game = mcWorld?.gameState?.() ?? { mode: 'survival', difficulty: 'normal' }
+  const modeButton = petMenu.querySelector('[data-act="mode"]')
+  const difficultyButton = petMenu.querySelector('[data-act="difficulty"]')
+  if (modeButton) {
+    modeButton.textContent = `模式：${gameModeLabel(game.mode)}`
+  }
+  if (difficultyButton) {
+    difficultyButton.textContent = `难度：${difficultyLabel(game.difficulty)}`
+  }
   petMenu.hidden = false
-  const width = 160
-  const height = 72
+  const width = 190
+  const height = 132
   const left = Math.max(4, Math.min(window.innerWidth - width - 4, x))
   const top = Math.max(4, Math.min(window.innerHeight - height - 4, y))
   petMenu.style.left = `${left}px`
@@ -1874,6 +2088,7 @@ function releaseEdgeChute() {
   if (!climb || climb.kind !== 'edge') {
     return
   }
+  pinned = false
   climb = null
   pet.onGround = false
   pet.vy = -1.5
@@ -1885,6 +2100,7 @@ function releaseEdgeChute() {
   }
 }
 function hopOffWindow() {
+  pinned = false
   if (pet.seatId) {
     ignoreSeatId = pet.seatId
     pet.seatId = null
@@ -1906,6 +2122,9 @@ function steerControl() {
     }
     return
   }
+  if (controlKeys.a !== controlKeys.d || controlKeys.w) {
+    pinned = false
+  }
   if (controlKeys.a !== controlKeys.d) {
     const face = controlKeys.d ? 1 : -1
     wander = { targetX: pet.x + face * 480, face }
@@ -1919,6 +2138,11 @@ function steerControl() {
 }
 
 
+function isCreative() {
+  return mcWorld?.gameState?.().mode === 'creative'
+    || mcWorld?.survivalState?.()?.mode === 'creative'
+}
+
 async function toggleCreative() {
   if (!controlling || !mcWorld) {
     return
@@ -1927,8 +2151,11 @@ async function toggleCreative() {
     creativeView.close()
     return
   }
-  creativeView.syncHotbar(mcWorld.hotbarState())
-  await creativeView.open()
+  if (stationView.isOpen()) {
+    stationView.close()
+    return
+  }
+  openBackpack()
 }
 async function setControl(on) {
   controlling = on
@@ -1940,6 +2167,7 @@ async function setControl(on) {
   if (!on) {
     creativeView.close()
     stationView.close()
+    mcWorld?.stopMine?.()
     wander = null
     controlKeys.w = false
     controlKeys.a = false
@@ -2031,6 +2259,16 @@ function bindControl() {
       window.location.reload()
     } else if (act === 'control') {
       setControl(!controlling)
+    } else if (act === 'mode') {
+      mcWorld?.cycleGameMode?.()
+      if (isCreative()) {
+        stationView.close()
+        survivalView.setVisible(false)
+      } else {
+        creativeView.close()
+      }
+    } else if (act === 'difficulty') {
+      mcWorld?.cycleDifficulty?.()
     }
   })
 }
@@ -2039,8 +2277,8 @@ function publishPointer() {
     return
   }
   const rects = hidden ? [] : controlling
-    ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
-    : [hitRect(), ...(mcWorld?.blockHitRects() ?? [])]
+      ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
+      : [hitRect(), ...(mcWorld?.blockHitRects() ?? [])]
   const menuBox = menuRect()
   if (menuBox) {
     rects.push(menuBox)
@@ -2073,6 +2311,14 @@ function sameChest(block, id) {
 
 function openBackpack() {
   if (!mcWorld) {
+    return
+  }
+  if (isCreative()) {
+    if (stationView.isOpen()) {
+      stationView.close()
+    }
+    creativeView.syncHotbar(mcWorld.hotbarState())
+    void creativeView.open()
     return
   }
   if (creativeView.isOpen()) {
@@ -2138,7 +2384,12 @@ function actBlock(hold, layer) {
   if (!mcWorld || !hold) {
     return
   }
+  const selected = mcWorld.selectedBlock?.()
   if (hold.button === 0) {
+    if (selected && isWeapon(selected)) {
+      mcWorld.attackAt(hold.x, hold.y)
+      return
+    }
     const broken = mcWorld.breakAt(hold.x, hold.y, layer)
     if (broken?.ok) {
       playBreak(broken.removed?.[0]?.id)
@@ -2146,6 +2397,13 @@ function actBlock(hold, layer) {
     return
   }
   if (hold.button !== 2) {
+    return
+  }
+  if (selected && mcWorld.eatSelected && isFood(selected)) {
+    mcWorld.eatSelected()
+    return
+  }
+  if (selected && isWeapon(selected)) {
     return
   }
   const placed = mcWorld.placeAt(hold.x, hold.y, pet.x, pet.y, layer)
@@ -2158,8 +2416,23 @@ function actBlock(hold, layer) {
   }
 }
 
-function tickBlockHold() {
-  if (!blockHold || !controlling || blockHold.fired) {
+function tickBlockHold(delta) {
+  if (!blockHold || !controlling) {
+    mcWorld?.stopMine?.()
+    return
+  }
+  if (blockHold.button === 0 && !isCreative()) {
+    const result = mcWorld?.tickMine?.(blockHold.x, blockHold.y, delta)
+    if (result?.hitSound) {
+      playDig(result.id)
+    }
+    if (result?.broken?.ok) {
+      playBreak(result.broken.removed?.[0]?.id ?? result.id)
+    }
+    return
+  }
+  mcWorld?.stopMine?.()
+  if (blockHold.fired) {
     return
   }
   if (performance.now() - blockHold.at < BLOCK_HOLD_MS) {
@@ -2239,6 +2512,10 @@ function bindPointer() {
       pointer.x = event.clientX
       pointer.y = event.clientY
       moveCross(event.clientX, event.clientY)
+      if (blockHold) {
+        blockHold.x = event.clientX
+        blockHold.y = event.clientY
+      }
     }
     const rect = hitRect()
     const over = event.clientX >= rect.x && event.clientX <= rect.x + rect.width
@@ -2254,6 +2531,7 @@ function bindPointer() {
       const moved = Math.hypot(event.clientX - pressX, event.clientY - pressY)
       if (moved > 8) {
         holding = true
+        pinned = false
         falling = false
         if (chicken) {
           chicken.group.visible = false
@@ -2273,6 +2551,7 @@ function bindPointer() {
     lastPointer = { x: event.clientX, y: event.clientY }
     pointer.x = event.clientX
     pointer.y = event.clientY
+    noteDrag(event.clientX, event.clientY)
     if (mcWorld) {
       const at = mcWorld.resolvePosition(event.clientX, event.clientY)
       pet.x = at.x
@@ -2288,7 +2567,9 @@ function bindPointer() {
     if (blockHold) {
       const hold = blockHold
       blockHold = null
-      if (controlling && !hold.fired) {
+      const survivalMine = hold.button === 0 && !isCreative()
+      mcWorld?.stopMine?.()
+      if (controlling && !hold.fired && !survivalMine) {
         actBlock(hold, 'front')
       }
     }
@@ -2309,12 +2590,32 @@ function bindPointer() {
       lastTap = now
       return
     }
+    noteDrag(event.clientX, event.clientY)
+    const thrown = throwVelocity()
+    dragTrail = []
+    dragVel = thrown
+    const dropSpeed = Math.hypot(thrown.x, thrown.y)
+    const downward = Math.max(0, thrown.y)
+    const draggedUp = event.clientY < pressY - 8
     if (trySit(event.clientX, event.clientY, true)) {
       return
     }
+    if (draggedUp) {
+      const seat = seatAbove(windows, event.clientX, event.clientY)
+      if (seat && sitOn(seat, event.clientX)) {
+        actions.handle('sit')
+        return
+      }
+    }
+    const upward = thrown.y < -300 && Math.abs(thrown.y) > Math.abs(thrown.x) * 0.6
+    if (!upward && (downward >= 900 || dropSpeed >= 1400)) {
+      pinned = false
+      pet.seatId = null
+      launchDoll(thrown.x, thrown.y)
+      return
+    }
+    pinned = false
     pet.seatId = null
-    const dropSpeed = Math.hypot(dragVel.x, dragVel.y)
-    const downward = Math.max(0, dragVel.y)
     if (doll) {
       releaseDoll(doll)
       doll = null
@@ -2322,13 +2623,9 @@ function bindPointer() {
     phase = null
     pet.vx = dragVel.x / BLOCK_PX
     pet.vy = -dragVel.y / BLOCK_PX
-    if (groundGap() < 18) {
-      if (downward >= 900 || dropSpeed >= 1400) {
-        launchDoll(dragVel.x, dragVel.y)
-      } else {
-        standUp()
-        actions.handle('drag-end')
-      }
+    if (groundGap() < 18 && !draggedUp) {
+      standUp()
+      actions.handle('drag-end')
       return
     }
     pet.onGround = false
@@ -2356,7 +2653,7 @@ function frame(now) {
   const delta = Math.min(0.05, (now - lastFrame) / 1000)
   lastFrame = now
   try {
-    if (pet.seatId && !holding && !falling && phase !== 'leap' && phase !== 'ragdoll' && phase !== 'glance') {
+    if (trackedWindowId() && !holding && phase !== 'leap' && phase !== 'ragdoll' && phase !== 'glance') {
       pollSeat()
     }
     followSeat()
@@ -2481,7 +2778,8 @@ Promise.all([
     window.mc.build = (json) => startBuild(json || starterSchematic)
     const world = pendingWorld || await loadWorldFile()
     pendingWorld = null
-    if (world?.blocks?.length || world?.hand || world?.offhand || world?.hotbar || world?.inv) {
+    const hasWorld = Boolean(world?.created || world?.blocks?.length || world?.hand || world?.offhand || world?.hotbar || world?.inv || world?.survival)
+    if (hasWorld) {
       await api.loadSave(world)
     }
     if (!holding && pet.mode !== 'sit') {
@@ -2495,6 +2793,10 @@ Promise.all([
       }
       pet.onGround = true
       pet.vy = 0
+    }
+    if (!hasWorld) {
+      await api.createWorld({ mode: 'creative', difficulty: 'peaceful' })
+      await setControl(true)
     }
   }),
 ]).then(() => {
